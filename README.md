@@ -85,7 +85,7 @@ http://localhost:5173
 ## Estructura del Proyecto
 
 ```
-coordtransform-ecuador/
+Coord-Transform-Quito/
 ├── src/
 │   ├── components/
 │   │   ├── CoordinateInput.jsx      # Formulario de entrada manual
