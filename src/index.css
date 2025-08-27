@@ -1,0 +1,24 @@
+@import "leaflet/dist/leaflet.css";
+
+/* Usar Tailwind CSS desde CDN más confiable */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Si Tailwind no carga, usar estos estilos de respaldo */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.6;
+    color: #111827;
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 50%, #f0f4ff 100%);
+    min-height: 100vh;
+  }
+}
