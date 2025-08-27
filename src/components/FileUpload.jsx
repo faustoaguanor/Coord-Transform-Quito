@@ -127,6 +127,13 @@ const FileUpload = ({ onFileUpload }) => {
   const handleFile = async (file) => {
     if (!file) return;
 
+    // Limitar tamaño a 5 MB
+    const MAX_SIZE = 5 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      alert("❌ Archivo demasiado grande. Máximo permitido: 5 MB.");
+      return;
+    }
+
     setIsProcessing(true);
     setFilePreview(null);
 
@@ -140,7 +147,9 @@ const FileUpload = ({ onFileUpload }) => {
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: "buffer" });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
+        // ⚡ Hacer copia profunda para aislar datos
+        data = JSON.parse(JSON.stringify(data));
       } else {
         throw new Error("Formato de archivo no soportado. Use CSV o Excel.");
       }
