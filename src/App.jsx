@@ -1,5 +1,6 @@
 // src/App.jsx
 import { useState } from "react";
+import * as XLSX from "xlsx";
 import CoordinateInput from "./components/CoordinateInput";
 import FileUpload from "./components/FileUpload";
 import MapComponent from "./components/MapComponent";
@@ -7,6 +8,8 @@ import {
   exportData,
   transformCoordinatesBatch,
 } from "./utils/coordinateTransformations";
+
+window.XLSX = XLSX;
 
 function App() {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -336,6 +339,7 @@ function App() {
 
         {selectedTab === "results" && (
           <div>
+            {/* Header con solo botón limpiar */}
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-900">
                 📊 Resultados de Transformación
@@ -348,13 +352,6 @@ function App() {
                   🗑️ Limpiar Resultados
                 </button>
               )}
-
-              <button
-                onClick={() => exportData(results, "csv")}
-                className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-              >
-                📄 Exportar CSV
-              </button>
             </div>
 
             {results.length === 0 ? (
@@ -364,8 +361,8 @@ function App() {
                   No hay coordenadas transformadas aún
                 </h3>
                 <p className="text-gray-600 mb-6">
-                  Utiliza la entrada manual para transformar tus primeras
-                  coordenadas.
+                  Utiliza la entrada manual o carga de archivos para transformar
+                  tus primeras coordenadas.
                 </p>
                 <button
                   onClick={() => setSelectedTab("input")}
@@ -545,41 +542,74 @@ function App() {
                   </div>
                 </div>
 
-                {/* Export Options */}
+                {/* Export Options - SECCIÓN ÚNICA DE EXPORTACIÓN */}
                 <div className="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">
                     📁 Opciones de Exportación
                   </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <button className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <button
+                      onClick={() => exportData(results, "csv")}
+                      className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center hover:shadow-md"
+                      disabled={results.length === 0}
+                    >
                       <div className="text-2xl mb-2">📄</div>
                       <div className="font-medium">CSV</div>
                       <div className="text-xs text-gray-500">
                         Excel compatible
                       </div>
                     </button>
-                    <button className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center">
+
+                    <button
+                      onClick={() => exportData(results, "excel")}
+                      className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center hover:shadow-md"
+                      disabled={results.length === 0}
+                    >
                       <div className="text-2xl mb-2">📊</div>
                       <div className="font-medium">Excel</div>
                       <div className="text-xs text-gray-500">
                         Formato nativo
                       </div>
                     </button>
-                    <button className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center">
+
+                    <button
+                      onClick={() => exportData(results, "geojson")}
+                      className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center hover:shadow-md"
+                      disabled={results.length === 0}
+                    >
                       <div className="text-2xl mb-2">🗺️</div>
                       <div className="font-medium">GeoJSON</div>
                       <div className="text-xs text-gray-500">Para SIG</div>
                     </button>
-                    <button className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center">
-                      <div className="text-2xl mb-2">🌍</div>
-                      <div className="font-medium">KML</div>
-                      <div className="text-xs text-gray-500">Google Earth</div>
-                    </button>
                   </div>
-                  <p className="text-sm text-gray-500 mt-4">
-                    * Las opciones de exportación estarán disponibles
-                    próximamente
-                  </p>
+
+                  {/* Información actualizada sobre los formatos */}
+                  <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                    <div className="text-sm text-blue-800">
+                      <strong>💡 Información sobre formatos:</strong>
+                      <ul className="mt-2 space-y-1 text-xs">
+                        <li>
+                          <strong>CSV:</strong> Compatible con Excel,
+                          LibreOffice y hojas de cálculo
+                        </li>
+                        <li>
+                          <strong>Excel:</strong> Formato nativo .xlsx con
+                          estilos y metadatos
+                        </li>
+                        <li>
+                          <strong>GeoJSON:</strong> Para sistemas SIG avanzados
+                          (coordenadas en sistema transformado)
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  {results.length === 0 && (
+                    <div className="mt-4 text-center text-gray-500 text-sm">
+                      No hay datos para exportar. Transforma algunas coordenadas
+                      primero.
+                    </div>
+                  )}
                 </div>
               </div>
             )}

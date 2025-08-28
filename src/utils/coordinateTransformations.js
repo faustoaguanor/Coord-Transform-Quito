@@ -1,6 +1,5 @@
 // src/utils/coordinateTransformations.js
 import proj4 from "proj4";
-import * as XLSX from "xlsx";
 
 // Sistemas de coordenadas para Ecuador
 const COORDINATE_SYSTEMS = {
@@ -527,78 +526,234 @@ export const formatCoordinate = (value, type = "decimal", precision = 6) => {
   }
 };
 
-// Función de exportación
-export const exportData = (results, format) => {
-  const timestamp = new Date().toISOString().split("T")[0];
+// ==================== FUNCIONES DE EXPORTACIÓN ====================
 
-  if (format === "csv") {
-    const headers = [
-      "ID",
-      "Nombre",
-      "Estado",
-      "Lat_Original",
-      "Lng_Original",
-      "Sistema_Original",
-      "X_Transformado",
-      "Y_Transformado",
-      "Sistema_Destino",
-      "Precision_Calidad",
-    ];
-
-    const csvData = [
-      headers.join(","),
-      ...results.map((r) => {
-        const row = [
-          r.id,
-          `"${r.name || ""}"`,
-          r.status,
-          r.transformation?.source?.y
-            ? r.transformation.source.y.toFixed(8)
-            : "",
-          r.transformation?.source?.x
-            ? r.transformation.source.x.toFixed(8)
-            : "",
-          r.transformation?.source?.crs || "",
-          r.transformation?.target?.x
-            ? r.transformation.target.x.toFixed(2)
-            : "",
-          r.transformation?.target?.y
-            ? r.transformation.target.y.toFixed(2)
-            : "",
-          r.transformation?.target?.crs || "",
-          r.precision?.quality || "",
-        ];
-        return row.join(",");
-      }),
-    ].join("\n");
-
-    const BOM = "\uFEFF";
-    const blob = new Blob([BOM + csvData], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `coordenadas_ecuador_${timestamp}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+// Función principal de exportación
+export const exportData = (results, format = "csv") => {
+  if (!results || results.length === 0) {
+    alert("No hay datos para exportar");
+    return;
   }
 
-  if (format === "excel") {
-    const excelData = results.map((r) => ({
-      ID: r.id,
-      Nombre: r.name || "",
-      Estado: r.status,
-      Lat_Original: r.transformation?.source?.y || "",
-      Lng_Original: r.transformation?.source?.x || "",
-      Sistema_Original: r.transformation?.source?.crs || "",
-      X_Transformado: r.transformation?.target?.x || "",
-      Y_Transformado: r.transformation?.target?.y || "",
-      Sistema_Destino: r.transformation?.target?.crs || "",
-      Precision_Calidad: r.precision?.quality || "",
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(excelData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Coordenadas");
-    XLSX.writeFile(wb, `coordenadas_ecuador_${timestamp}.xlsx`);
+  try {
+    switch (format.toLowerCase()) {
+      case "csv":
+        exportToCSV(results);
+        break;
+      case "excel":
+        exportToExcel(results);
+        break;
+      case "geojson":
+        exportToGeoJSON(results);
+        break;
+      default:
+        console.error("Formato no soportado:", format);
+        alert("Formato de exportación no soportado");
+    }
+  } catch (error) {
+    console.error("Error en exportación:", error);
+    alert(`Error al exportar: ${error.message}`);
   }
+};
+
+// Exportar a CSV
+const exportToCSV = (results) => {
+  const headers = [
+    "ID",
+    "Nombre",
+    "Descripción",
+    "Lat_Original",
+    "Lng_Original",
+    "Sistema_Original",
+    "X_Transformado",
+    "Y_Transformado",
+    "Sistema_Destino",
+    "Precisión",
+    "Calidad_Precisión",
+    "Estado",
+  ];
+
+  const rows = results.map((result) => [
+    result.id || "",
+    result.name || "",
+    result.description || "",
+    result.transformation?.source?.y?.toFixed(6) || "",
+    result.transformation?.source?.x?.toFixed(6) || "",
+    result.transformation?.source?.crs || "",
+    result.transformation?.target?.x?.toFixed(2) || "",
+    result.transformation?.target?.y?.toFixed(2) || "",
+    result.transformation?.target?.crs || "",
+    result.precision?.value?.toFixed(3) || "",
+    result.precision?.quality || "",
+    result.status || "",
+  ]);
+
+  const csvContent = [headers, ...rows]
+    .map((row) => row.map((field) => `"${field}"`).join(","))
+    .join("\n");
+
+  downloadFile(csvContent, "coordenadas_transformadas.csv", "text/csv");
+};
+
+// Exportar a Excel usando XLSX library
+const exportToExcel = (results) => {
+  // Preparar datos para XLSX
+  const worksheetData = results.map((result) => ({
+    ID: result.id || "",
+    Nombre: result.name || "",
+    Descripción: result.description || "",
+    "Latitud Original": result.transformation?.source?.y?.toFixed(6) || "",
+    "Longitud Original": result.transformation?.source?.x?.toFixed(6) || "",
+    "Sistema Original": result.transformation?.source?.crs || "",
+    "X Transformado (m)": result.transformation?.target?.x?.toFixed(2) || "",
+    "Y Transformado (m)": result.transformation?.target?.y?.toFixed(2) || "",
+    "Sistema Destino": result.transformation?.target?.crs || "",
+    Precisión: result.precision?.value?.toFixed(3) || "",
+    "Calidad Precisión": result.precision?.quality || "",
+    Estado: result.status || "",
+    "Fecha Procesamiento": new Date().toLocaleString("es-EC"),
+  }));
+
+  // Crear workbook y worksheet
+  if (!window.XLSX) {
+    throw new Error(
+      "Librería XLSX no está disponible. Asegúrate de importar XLSX en App.jsx"
+    );
+  }
+  const XLSX = window.XLSX;
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+
+  // Ajustar ancho de columnas
+  const columnWidths = [
+    { wch: 10 }, // ID
+    { wch: 20 }, // Nombre
+    { wch: 30 }, // Descripción
+    { wch: 15 }, // Latitud Original
+    { wch: 15 }, // Longitud Original
+    { wch: 15 }, // Sistema Original
+    { wch: 18 }, // X Transformado
+    { wch: 18 }, // Y Transformado
+    { wch: 15 }, // Sistema Destino
+    { wch: 12 }, // Precisión
+    { wch: 18 }, // Calidad Precisión
+    { wch: 10 }, // Estado
+    { wch: 20 }, // Fecha Procesamiento
+  ];
+  worksheet["!cols"] = columnWidths;
+
+  // Agregar worksheet al workbook
+  XLSX.utils.book_append_sheet(
+    workbook,
+    worksheet,
+    "Coordenadas Transformadas"
+  );
+
+  // Exportar
+  XLSX.writeFile(workbook, "coordenadas_transformadas.xlsx");
+};
+
+// Exportar a GeoJSON
+const exportToGeoJSON = (results) => {
+  const features = results
+    .filter(
+      (result) => result.transformation?.target && result.status === "success"
+    )
+    .map((result) => {
+      // Usar DIRECTAMENTE las coordenadas transformadas (sistema destino)
+      const longitude = result.transformation.target.x;
+      const latitude = result.transformation.target.y;
+
+      return {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [longitude, latitude],
+        },
+        properties: {
+          id: result.id,
+          name: result.name || `Punto ${result.id}`,
+          description: result.description || "",
+          original_system: result.transformation.source?.crs || "",
+          original_x: result.transformation.source?.x || null,
+          original_y: result.transformation.source?.y || null,
+          transformed_system: result.transformation.target?.crs || "",
+          transformed_x: result.transformation.target?.x || null,
+          transformed_y: result.transformation.target?.y || null,
+          precision: result.precision?.value || null,
+          precision_quality: result.precision?.quality || "",
+          status: result.status || "",
+          processed_date: new Date().toISOString(),
+        },
+      };
+    });
+
+  const geoJSON = {
+    type: "FeatureCollection",
+    crs: {
+      type: "name",
+      properties: {
+        // Usar el sistema de coordenadas transformado, no WGS84
+        name: results[0]?.transformation?.target?.crs || "SIRES-DMQ",
+      },
+    },
+    features: features,
+    metadata: {
+      title: "Coordenadas Transformadas UIO",
+      description: `Coordenadas en sistema ${
+        results[0]?.transformation?.target?.crs || "transformado"
+      }`,
+      generated: new Date().toISOString(),
+      total_points: features.length,
+      coordinate_system: results[0]?.transformation?.target?.crs || "SIRES-DMQ",
+      warning: "Las coordenadas están en el sistema transformado, no en WGS84",
+    },
+  };
+
+  const geoJSONContent = JSON.stringify(geoJSON, null, 2);
+  downloadFile(
+    geoJSONContent,
+    "coordenadas_transformadas.geojson",
+    "application/geo+json"
+  );
+};
+
+// Función auxiliar para descargar archivos
+const downloadFile = (content, fileName, mimeType) => {
+  const blob = new Blob([content], { type: mimeType });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
+
+// Función para obtener estadísticas de transformación
+export const getTransformationStats = (results) => {
+  const total = results.length;
+  const successful = results.filter((r) => r.status === "success").length;
+  const failed = results.filter((r) => r.status === "error").length;
+  const excellent = results.filter(
+    (r) => r.precision?.quality === "Excelente"
+  ).length;
+  const veryGood = results.filter(
+    (r) => r.precision?.quality === "Muy buena"
+  ).length;
+  const good = results.filter((r) => r.precision?.quality === "Buena").length;
+
+  return {
+    total,
+    successful,
+    failed,
+    successRate: total > 0 ? ((successful / total) * 100).toFixed(1) : 0,
+    precision: {
+      excellent,
+      veryGood,
+      good,
+      excellentRate: total > 0 ? ((excellent / total) * 100).toFixed(1) : 0,
+    },
+  };
 };
