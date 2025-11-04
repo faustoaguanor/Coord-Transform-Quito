@@ -30,9 +30,9 @@ Aplicación web React para transformación de coordenadas entre sistemas de refe
 
 ### Exportación
 - **CSV** - Compatible con Excel, incluye BOM UTF-8
-- **Excel** - Formato nativo con columnas ajustadas (proximamente)
-- **GeoJSON** - Estándar para sistemas SIG (proximamente)
-- **KML** - Compatible con Google Earth (proximamente)
+- **Excel** - Formato nativo con columnas ajustadas
+- **GeoJSON** - Estándar para sistemas SIG
+- **KML** - Compatible con Google Earth
 
 ### Características Técnicas
 - Transformaciones precisas usando **proj4.js**

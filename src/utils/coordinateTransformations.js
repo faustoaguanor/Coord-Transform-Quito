@@ -546,6 +546,9 @@ export const exportData = (results, format = "csv") => {
       case "geojson":
         exportToGeoJSON(results);
         break;
+      case "kml":
+        exportToKML(results);
+        break;
       default:
         console.error("Formato no soportado:", format);
         alert("Formato de exportación no soportado");
@@ -716,6 +719,106 @@ const exportToGeoJSON = (results) => {
     "coordenadas_transformadas.geojson",
     "application/geo+json"
   );
+};
+
+// Exportar a KML (Google Earth)
+const exportToKML = (results) => {
+  const successfulResults = results.filter(
+    (result) => result.transformation?.source && result.status === "success"
+  );
+
+  if (successfulResults.length === 0) {
+    alert("No hay puntos exitosos para exportar a KML");
+    return;
+  }
+
+  // KML usa WGS84 (lat/lng), así que necesitamos las coordenadas originales si están en WGS84
+  // o transformarlas si están en otro sistema
+  const placemarks = successfulResults
+    .map((result) => {
+      let lat, lng;
+
+      // Si las coordenadas originales están en WGS84, usarlas directamente
+      if (
+        result.transformation.source.crs === "WGS84" ||
+        result.transformation.source.crs === "EPSG:4326"
+      ) {
+        lat = result.transformation.source.y;
+        lng = result.transformation.source.x;
+      } else {
+        // Si no, necesitamos transformar las coordenadas del sistema origen a WGS84
+        try {
+          const wgs84Coords = transformCoordinate(
+            result.transformation.source.x,
+            result.transformation.source.y,
+            result.transformation.source.crs,
+            "WGS84"
+          );
+          lat = wgs84Coords.y;
+          lng = wgs84Coords.x;
+        } catch (error) {
+          console.error("Error transformando coordenadas para KML:", error);
+          return null;
+        }
+      }
+
+      // Crear el Placemark
+      return `    <Placemark>
+      <name>${escapeXml(result.name || `Punto ${result.id}`)}</name>
+      <description><![CDATA[
+        <strong>ID:</strong> ${result.id}<br/>
+        <strong>Sistema Original:</strong> ${result.transformation.source.crs}<br/>
+        <strong>Coordenadas Originales:</strong><br/>
+        X: ${result.transformation.source.x.toFixed(6)}<br/>
+        Y: ${result.transformation.source.y.toFixed(6)}<br/>
+        <strong>Sistema Transformado:</strong> ${result.transformation.target?.crs || ""}<br/>
+        <strong>Coordenadas Transformadas:</strong><br/>
+        X: ${result.transformation.target?.x?.toFixed(2) || ""}<br/>
+        Y: ${result.transformation.target?.y?.toFixed(2) || ""}<br/>
+        <strong>Precisión:</strong> ${result.precision?.value?.toFixed(3) || ""} (${result.precision?.quality || ""})<br/>
+        <strong>Fecha:</strong> ${new Date().toLocaleString("es-EC")}
+      ]]></description>
+      <Point>
+        <coordinates>${lng.toFixed(8)},${lat.toFixed(8)},0</coordinates>
+      </Point>
+    </Placemark>`;
+    })
+    .filter((placemark) => placemark !== null)
+    .join("\n");
+
+  const kmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Coordenadas Transformadas - Quito</name>
+    <description>Coordenadas transformadas exportadas el ${new Date().toLocaleString("es-EC")}</description>
+    <Style id="defaultStyle">
+      <IconStyle>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/kml/paddle/red-circle.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+${placemarks}
+  </Document>
+</kml>`;
+
+  downloadFile(
+    kmlContent,
+    "coordenadas_transformadas.kml",
+    "application/vnd.google-earth.kml+xml"
+  );
+};
+
+// Función auxiliar para escapar caracteres especiales en XML
+const escapeXml = (text) => {
+  if (!text) return "";
+  return text
+    .toString()
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 };
 
 // Función auxiliar para descargar archivos

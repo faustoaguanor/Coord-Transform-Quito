@@ -581,6 +581,16 @@ function App() {
                       <div className="font-medium">GeoJSON</div>
                       <div className="text-xs text-gray-500">Para SIG</div>
                     </button>
+
+                    <button
+                      onClick={() => exportData(results, "kml")}
+                      className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center hover:shadow-md"
+                      disabled={results.length === 0}
+                    >
+                      <div className="text-2xl mb-2">🌍</div>
+                      <div className="font-medium">KML</div>
+                      <div className="text-xs text-gray-500">Google Earth</div>
+                    </button>
                   </div>
 
                   {/* Información actualizada sobre los formatos */}
