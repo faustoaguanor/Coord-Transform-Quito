@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 import CoordinateInput from "./components/CoordinateInput";
 import FileUpload from "./components/FileUpload";
@@ -7,9 +7,15 @@ import MapComponent from "./components/MapComponent";
 import {
   exportData,
   transformCoordinatesBatch,
+  copyToClipboard,
+  formatCoordinatesForCopy,
 } from "./utils/coordinateTransformations";
 
 window.XLSX = XLSX;
+
+// Constantes para LocalStorage
+const STORAGE_KEY = "coord_transform_history";
+const MAX_HISTORY_ITEMS = 100;
 
 function App() {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -18,8 +24,42 @@ function App() {
     message: "",
     currentStep: "",
   });
-  const [results, setResults] = useState([]);
+
+  // Cargar historial desde LocalStorage al inicio
+  const [results, setResults] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error("Error cargando historial:", error);
+      return [];
+    }
+  });
+
   const [selectedTab, setSelectedTab] = useState("input"); // 'input', 'results', 'map'
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all"); // 'all', 'success', 'error'
+  const [copiedId, setCopiedId] = useState(null);
+
+  // Guardar resultados en LocalStorage cada vez que cambian
+  useEffect(() => {
+    try {
+      // Limitar el número de elementos guardados
+      const toSave = results.slice(0, MAX_HISTORY_ITEMS);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    } catch (error) {
+      console.error("Error guardando historial:", error);
+      // Si el localStorage está lleno, intentar limpiar
+      if (error.name === 'QuotaExceededError') {
+        try {
+          const reduced = results.slice(0, 50);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(reduced));
+        } catch {
+          console.error("No se pudo guardar el historial reducido");
+        }
+      }
+    }
+  }, [results]);
 
   const handleBatchTransform = async (coordinates) => {
     setIsProcessing(true);
@@ -186,9 +226,44 @@ function App() {
 
   const handleClearResults = () => {
     setResults([]);
+    setSearchTerm("");
+    setFilterStatus("all");
   };
 
-  const getStatusColor = (status) => {
+  const handleCopyCoordinates = async (result) => {
+    const text = formatCoordinatesForCopy(result);
+    const success = await copyToClipboard(text);
+    if (success) {
+      setCopiedId(result.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } else {
+      alert("Error al copiar al portapapeles");
+    }
+  };
+
+  // Filtrar y buscar resultados usando useMemo para optimizar rendimiento
+  const filteredResults = useMemo(() => {
+    let filtered = results;
+
+    // Filtrar por estado
+    if (filterStatus !== "all") {
+      filtered = filtered.filter((r) => r.status === filterStatus);
+    }
+
+    // Buscar por nombre o ID
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(
+        (r) =>
+          r.name?.toLowerCase().includes(term) ||
+          r.id?.toString().toLowerCase().includes(term)
+      );
+    }
+
+    return filtered;
+  }, [results, searchTerm, filterStatus]);
+
+  const getStatusColor = () => {
     switch (processingStatus.currentStep) {
       case "completed":
         return "bg-green-500";
@@ -339,18 +414,63 @@ function App() {
 
         {selectedTab === "results" && (
           <div>
-            {/* Header con solo botón limpiar */}
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">
-                📊 Resultados de Transformación
-              </h2>
+            {/* Header con búsqueda y filtros */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold text-gray-900">
+                  📊 Resultados de Transformación
+                </h2>
+                {results.length > 0 && (
+                  <button
+                    onClick={handleClearResults}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                  >
+                    🗑️ Limpiar Resultados
+                  </button>
+                )}
+              </div>
+
+              {/* Barra de búsqueda y filtros */}
               {results.length > 0 && (
-                <button
-                  onClick={handleClearResults}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                >
-                  🗑️ Limpiar Resultados
-                </button>
+                <div className="bg-white p-4 rounded-lg shadow border border-gray-200">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        🔍 Buscar por nombre o ID
+                      </label>
+                      <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Buscar..."
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        🎯 Filtrar por estado
+                      </label>
+                      <select
+                        value={filterStatus}
+                        onChange={(e) => setFilterStatus(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="all">Todos ({results.length})</option>
+                        <option value="success">
+                          Exitosos ({results.filter((r) => r.status === "success").length})
+                        </option>
+                        <option value="error">
+                          Con errores ({results.filter((r) => r.status === "error").length})
+                        </option>
+                      </select>
+                    </div>
+                  </div>
+                  {(searchTerm || filterStatus !== "all") && (
+                    <div className="mt-3 text-sm text-gray-600">
+                      Mostrando {filteredResults.length} de {results.length} resultados
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -437,10 +557,13 @@ function App() {
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Estado
                           </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Acciones
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {results.map((result, index) => (
+                        {filteredResults.map((result, index) => (
                           <tr
                             key={result.id}
                             className={
@@ -535,6 +658,19 @@ function App() {
                                   : "❌ Error"}
                               </span>
                             </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <button
+                                onClick={() => handleCopyCoordinates(result)}
+                                className={`px-3 py-1 text-xs rounded transition-colors ${
+                                  copiedId === result.id
+                                    ? "bg-green-600 text-white"
+                                    : "bg-blue-600 text-white hover:bg-blue-700"
+                                }`}
+                                title="Copiar coordenadas"
+                              >
+                                {copiedId === result.id ? "✓ Copiado" : "📋 Copiar"}
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -547,7 +683,7 @@ function App() {
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">
                     📁 Opciones de Exportación
                   </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <button
                       onClick={() => exportData(results, "csv")}
                       className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center hover:shadow-md"
@@ -581,6 +717,16 @@ function App() {
                       <div className="font-medium">GeoJSON</div>
                       <div className="text-xs text-gray-500">Para SIG</div>
                     </button>
+
+                    <button
+                      onClick={() => exportData(results, "kml")}
+                      className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center hover:shadow-md"
+                      disabled={results.length === 0}
+                    >
+                      <div className="text-2xl mb-2">🌍</div>
+                      <div className="font-medium">KML</div>
+                      <div className="text-xs text-gray-500">Google Earth</div>
+                    </button>
                   </div>
 
                   {/* Información actualizada sobre los formatos */}
@@ -599,6 +745,10 @@ function App() {
                         <li>
                           <strong>GeoJSON:</strong> Para sistemas SIG avanzados
                           (coordenadas en sistema transformado)
+                        </li>
+                        <li>
+                          <strong>KML:</strong> Compatible con Google Earth y Google Maps
+                          (coordenadas en WGS84)
                         </li>
                       </ul>
                     </div>
