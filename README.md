@@ -27,12 +27,16 @@ Aplicación web React para transformación de coordenadas entre sistemas de refe
 - **Procesamiento por lotes** para archivos con múltiples puntos
 - **Mapa interactivo** con múltiples capas base y soporte WMS
 - **Manejo inteligente de formatos numéricos** (puntos/comas decimales y separadores de miles)
+- **Búsqueda y filtrado** de resultados en tiempo real
+- **Copiar al portapapeles** coordenadas transformadas con un clic
+- **Historial persistente** de transformaciones (LocalStorage)
+- **Calculadora de distancias** entre puntos geográficos
 
 ### Exportación
 - **CSV** - Compatible con Excel, incluye BOM UTF-8
-- **Excel** - Formato nativo con columnas ajustadas (proximamente)
-- **GeoJSON** - Estándar para sistemas SIG (proximamente)
-- **KML** - Compatible con Google Earth (proximamente)
+- **Excel** - Formato nativo .xlsx con columnas ajustadas y metadatos
+- **GeoJSON** - Estándar para sistemas SIG (coordenadas en sistema transformado)
+- **KML** - Compatible con Google Earth y Google Maps (coordenadas en WGS84)
 
 ### Características Técnicas
 - Transformaciones precisas usando **proj4.js**
@@ -41,6 +45,9 @@ Aplicación web React para transformación de coordenadas entre sistemas de refe
 - Soporte para servicios **WMS** personalizados
 - Manejo robusto de errores y validaciones
 - Procesamiento asíncrono con indicadores de progreso
+- Optimización de rendimiento con React.memo y useMemo
+- Persistencia de datos con LocalStorage
+- Cálculo de distancias usando fórmula de Haversine
 
 ## Instalación
 
@@ -128,9 +135,15 @@ Coord-Transform-Quito/
 - Auto-ajuste de vista para mostrar todos los puntos
 
 ### Exportación
-- Seleccionar formato de exportación deseado
-- Descarga automática del archivo
- 
+- Seleccionar formato de exportación deseado (CSV, Excel, GeoJSON, KML)
+- Descarga automática del archivo con todos los datos transformados
+
+### Funcionalidades Adicionales
+- **Búsqueda:** Filtra resultados por nombre o ID en tiempo real
+- **Copiar coordenadas:** Botón para copiar coordenadas al portapapeles en cada resultado
+- **Historial:** Las transformaciones se guardan automáticamente y persisten entre sesiones
+- **Distancias:** Función integrada para calcular distancias entre puntos
+
 
 ## Ejemplos de Uso
 

@@ -546,6 +546,9 @@ export const exportData = (results, format = "csv") => {
       case "geojson":
         exportToGeoJSON(results);
         break;
+      case "kml":
+        exportToKML(results);
+        break;
       default:
         console.error("Formato no soportado:", format);
         alert("Formato de exportación no soportado");
@@ -718,6 +721,97 @@ const exportToGeoJSON = (results) => {
   );
 };
 
+// Exportar a KML (compatible con Google Earth)
+const exportToKML = (results) => {
+  const validResults = results.filter(
+    (result) => result.transformation?.source && result.status === "success"
+  );
+
+  if (validResults.length === 0) {
+    alert("No hay coordenadas válidas para exportar a KML");
+    return;
+  }
+
+  // KML requiere coordenadas en WGS84 (lat/lng)
+  const placemarks = validResults.map((result) => {
+    // Usar coordenadas originales si ya están en WGS84, sino transformar
+    const lat = result.transformation.source.y;
+    const lng = result.transformation.source.x;
+
+    const name = result.name || `Punto ${result.id}`;
+    const description = `
+      <![CDATA[
+        <h3>${name}</h3>
+        <table border="1" cellpadding="5">
+          <tr><th colspan="2">Coordenadas Originales</th></tr>
+          <tr><td>Latitud</td><td>${lat.toFixed(6)}°</td></tr>
+          <tr><td>Longitud</td><td>${lng.toFixed(6)}°</td></tr>
+          <tr><td>Sistema</td><td>${result.transformation.source.crs}</td></tr>
+          ${result.transformation.target ? `
+          <tr><th colspan="2">Coordenadas Transformadas</th></tr>
+          <tr><td>Sistema</td><td>${result.transformation.target.crs}</td></tr>
+          <tr><td>Este (X)</td><td>${result.transformation.target.x.toFixed(2)} m</td></tr>
+          <tr><td>Norte (Y)</td><td>${result.transformation.target.y.toFixed(2)} m</td></tr>
+          ` : ''}
+          ${result.precision ? `
+          <tr><th colspan="2">Precisión</th></tr>
+          <tr><td>Calidad</td><td>${result.precision.quality}</td></tr>
+          ` : ''}
+        </table>
+      ]]>
+    `;
+
+    return `
+    <Placemark>
+      <name>${escapeXML(name)}</name>
+      <description>${description}</description>
+      <Point>
+        <coordinates>${lng},${lat},0</coordinates>
+      </Point>
+      <Style>
+        <IconStyle>
+          <color>ff0000ff</color>
+          <scale>1.0</scale>
+        </IconStyle>
+      </Style>
+    </Placemark>`;
+  }).join('\n');
+
+  const kmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Coordenadas Transformadas UIO</name>
+    <description>Exportado desde Transformador de Coordenadas Quito - ${new Date().toLocaleString('es-EC')}</description>
+    <Style id="defaultStyle">
+      <IconStyle>
+        <color>ff0000ff</color>
+        <scale>1.0</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href>
+        </Icon>
+      </IconStyle>
+      <LabelStyle>
+        <scale>0.8</scale>
+      </LabelStyle>
+    </Style>
+    ${placemarks}
+  </Document>
+</kml>`;
+
+  downloadFile(kmlContent, "coordenadas_transformadas.kml", "application/vnd.google-earth.kml+xml");
+};
+
+// Función auxiliar para escapar caracteres XML
+const escapeXML = (str) => {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+};
+
 // Función auxiliar para descargar archivos
 const downloadFile = (content, fileName, mimeType) => {
   const blob = new Blob([content], { type: mimeType });
@@ -756,4 +850,74 @@ export const getTransformationStats = (results) => {
       excellentRate: total > 0 ? ((excellent / total) * 100).toFixed(1) : 0,
     },
   };
+};
+
+// ==================== FUNCIONES ADICIONALES ====================
+
+// Calcular distancia entre dos puntos en coordenadas geográficas (Haversine)
+export const calculateDistance = (lat1, lng1, lat2, lng2) => {
+  const R = 6371000; // Radio de la Tierra en metros
+  const toRad = (deg) => (deg * Math.PI) / 180;
+
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c;
+
+  return {
+    meters: distance,
+    kilometers: distance / 1000,
+    formatted: distance > 1000
+      ? `${(distance / 1000).toFixed(2)} km`
+      : `${distance.toFixed(2)} m`,
+  };
+};
+
+// Copiar texto al portapapeles
+export const copyToClipboard = (text) => {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text)
+      .then(() => true)
+      .catch(() => false);
+  } else {
+    // Fallback para navegadores antiguos
+    try {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.select();
+      const result = document.execCommand("copy");
+      document.body.removeChild(textArea);
+      return Promise.resolve(result);
+    } catch {
+      return Promise.resolve(false);
+    }
+  }
+};
+
+// Formatear coordenadas para copiar
+export const formatCoordinatesForCopy = (result) => {
+  if (!result.transformation) return "";
+
+  const source = result.transformation.source;
+  const target = result.transformation.target;
+
+  return `${result.name || "Punto"}
+Coordenadas Originales (${source.crs}):
+  Latitud: ${source.y.toFixed(6)}°
+  Longitud: ${source.x.toFixed(6)}°
+
+Coordenadas Transformadas (${target.crs}):
+  Este (X): ${target.x.toFixed(2)} m
+  Norte (Y): ${target.y.toFixed(2)} m`;
 };
