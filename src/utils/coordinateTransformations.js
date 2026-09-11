@@ -337,7 +337,7 @@ export const transformCoordinatesBatch = async (
         sourceX = parseNumber(coord.coordinates.longitude);
         sourceY = parseNumber(coord.coordinates.latitude);
         sourceCRS = "EPSG:4326";
-      } else if (coord.easting && coord.northing) {
+      } else if (coord.easting !== undefined && coord.northing !== undefined) {
         sourceX = parseNumber(coord.easting);
         sourceY = parseNumber(coord.northing);
         sourceCRS = coord.system || config.sourceCRS;

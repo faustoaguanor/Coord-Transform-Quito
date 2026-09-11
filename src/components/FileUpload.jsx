@@ -116,6 +116,21 @@ const FileUpload = ({ onFileUpload }) => {
     return best?.count > 0 ? best.delimiter : ",";
   };
 
+  const detectProjectedSystem = (x, y) => {
+    if (x > 450000 && x < 550000 && y > 9950000 && y < 10050000) {
+      return "SIRES-DMQ";
+    }
+
+    if (x > 200000 && x < 800000) {
+      if (y > 9000000) return "UTM-17S";
+      if (y < 1000000) return "UTM-17N";
+      if (y > 800000) return "UTM-18S";
+      return "UTM-18N";
+    }
+
+    return "UTM-17S";
+  };
+
   // Función mejorada para parsear CSV
   const parseCSV = (text) => {
     const lines = text
@@ -271,25 +286,22 @@ const FileUpload = ({ onFileUpload }) => {
             hasValidCoords = true;
 
             // Respetar sistema de origen seleccionado; si está en auto, detectar por rangos
-            let system =
-              transformSettings.sourceSystem !== "auto"
-                ? transformSettings.sourceSystem
-                : "UTM-17S";
+            const detectedProjectedSystem = detectProjectedSystem(x, y);
+            const coordinatesLookGeographic =
+              x >= -180 && x <= 180 && y >= -90 && y <= 90;
+            const forceProjectedFromXY =
+              transformSettings.sourceSystem === "EPSG:4326" &&
+              !coordinatesLookGeographic;
 
-            if (transformSettings.sourceSystem === "auto") {
-              if (x > 450000 && x < 550000 && y > 9950000 && y < 10050000) {
-                system = "SIRES-DMQ";
-              } else if (x > 200000 && x < 800000) {
-                if (y > 9000000) {
-                  system = "UTM-17S"; // Sur
-                } else if (y < 1000000) {
-                  system = "UTM-17N"; // Norte
-                } else if (y > 800000) {
-                  system = "UTM-18S"; // Este Sur
-                } else {
-                  system = "UTM-18N"; // Este Norte
-                }
-              }
+            let system =
+              transformSettings.sourceSystem === "auto" || forceProjectedFromXY
+                ? detectedProjectedSystem
+                : transformSettings.sourceSystem;
+
+            if (forceProjectedFromXY) {
+              console.warn(
+                `⚠️ Fila ${i + 1}: columnas X/Y con valores proyectados detectadas; se ignora EPSG:4326 y se usa ${system}.`
+              );
             }
 
             coordinates.push({
