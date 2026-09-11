@@ -56,13 +56,13 @@ const FileUpload = ({ onFileUpload }) => {
     headers.forEach((header, index) => {
       const cleanHeader = header.toString().toLowerCase().trim();
 
-      // Detectar latitud
-      if (cleanHeader.match(/^(lat|latitude|latitud|y|norte|north|n)$/)) {
+      // Detectar latitud geográfica
+      if (cleanHeader.match(/^(lat|latitude|latitud)$/)) {
         headerMap.lat = index;
       }
-      // Detectar longitud
+      // Detectar longitud geográfica
       else if (
-        cleanHeader.match(/^(lon|lng|long|longitude|longitud|x|este|east|e)$/)
+        cleanHeader.match(/^(lon|lng|long|longitude|longitud)$/)
       ) {
         headerMap.lng = index;
       }
@@ -183,12 +183,17 @@ const FileUpload = ({ onFileUpload }) => {
       setFilePreview(preview);
 
       // Validar que tenemos las columnas necesarias
-      if (!coordMap.lat && !coordMap.lng && !coordMap.x && !coordMap.y) {
+      if (
+        coordMap.lat === undefined &&
+        coordMap.lng === undefined &&
+        coordMap.x === undefined &&
+        coordMap.y === undefined
+      ) {
         throw new Error(`❌ No se detectaron columnas de coordenadas válidas.
 
 📝 Use nombres como:
 • Geográficas: lat, latitude, latitud, lon, lng, longitude, longitud
-• Proyectadas: x, este, y, norte
+• Proyectadas: x, este/easting, y, norte/northing
 • UTM: utm_x, utm_y, easting, northing
 
 🔍 Columnas encontradas: ${headers.join(", ")}`);
@@ -235,19 +240,25 @@ const FileUpload = ({ onFileUpload }) => {
           if (!isNaN(x) && !isNaN(y)) {
             hasValidCoords = true;
 
-            // Detectar sistema proyectado basado en valores
-            let system = "UTM-17S"; // Por defecto
-            if (x > 450000 && x < 550000 && y > 9950000 && y < 10050000) {
-              system = "SIRES-DMQ";
-            } else if (x > 200000 && x < 800000) {
-              if (y > 9000000) {
-                system = "UTM-17S"; // Sur
-              } else if (y < 1000000) {
-                system = "UTM-17N"; // Norte
-              } else if (y > 800000) {
-                system = "UTM-18S"; // Este Sur
-              } else {
-                system = "UTM-18N"; // Este Norte
+            // Respetar sistema de origen seleccionado; si está en auto, detectar por rangos
+            let system =
+              transformSettings.sourceSystem !== "auto"
+                ? transformSettings.sourceSystem
+                : "UTM-17S";
+
+            if (transformSettings.sourceSystem === "auto") {
+              if (x > 450000 && x < 550000 && y > 9950000 && y < 10050000) {
+                system = "SIRES-DMQ";
+              } else if (x > 200000 && x < 800000) {
+                if (y > 9000000) {
+                  system = "UTM-17S"; // Sur
+                } else if (y < 1000000) {
+                  system = "UTM-17N"; // Norte
+                } else if (y > 800000) {
+                  system = "UTM-18S"; // Este Sur
+                } else {
+                  system = "UTM-18N"; // Este Norte
+                }
               }
             }
 
@@ -449,10 +460,10 @@ const FileUpload = ({ onFileUpload }) => {
             <div className="font-medium mb-1">🌍 Coordenadas Geográficas:</div>
             <ul className="list-disc list-inside space-y-1 ml-2">
               <li>
-                <code>lat, latitude, latitud, y, norte, north</code>
+                <code>lat, latitude, latitud</code>
               </li>
               <li>
-                <code>lon, lng, longitude, longitud, x, este, east</code>
+                <code>lon, lng, longitude, longitud</code>
               </li>
             </ul>
           </div>
