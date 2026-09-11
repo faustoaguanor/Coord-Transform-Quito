@@ -261,6 +261,28 @@ const FileUpload = ({ onFileUpload }) => {
             ? row[coordMap.name] || `Punto ${i + 1}`
             : `Punto ${i + 1}`;
 
+        const resolveProjectedSystem = (x, y) => {
+          const detectedProjectedSystem = detectProjectedSystem(x, y);
+          const coordinatesLookGeographic =
+            x >= -180 && x <= 180 && y >= -90 && y <= 90;
+          const forceProjectedFromXY =
+            transformSettings.sourceSystem === "EPSG:4326" &&
+            !coordinatesLookGeographic;
+
+          const system =
+            transformSettings.sourceSystem === "auto" || forceProjectedFromXY
+              ? detectedProjectedSystem
+              : transformSettings.sourceSystem;
+
+          if (forceProjectedFromXY) {
+            console.warn(
+              `⚠️ Fila ${i + 1}: columnas X/Y con valores proyectados detectadas; se ignora EPSG:4326 y se usa ${system}.`
+            );
+          }
+
+          return system;
+        };
+
         // Determinar si son coordenadas geográficas o proyectadas
         if (coordMap.lat !== undefined && coordMap.lng !== undefined) {
           lat = parseNumber(row[coordMap.lat]);
@@ -268,15 +290,45 @@ const FileUpload = ({ onFileUpload }) => {
 
           if (!isNaN(lat) && !isNaN(lng)) {
             hasValidCoords = true;
-            coordinates.push({
-              id: i + 1,
-              name: pointName,
-              coordinates: {
-                latitude: lat,
-                longitude: lng,
-              },
-              targetSystem: transformSettings.targetSystem, // Agregar sistema destino
-            });
+            const looksGeographic =
+              lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+
+            if (looksGeographic) {
+              coordinates.push({
+                id: i + 1,
+                name: pointName,
+                coordinates: {
+                  latitude: lat,
+                  longitude: lng,
+                },
+                targetSystem: transformSettings.targetSystem, // Agregar sistema destino
+              });
+            } else {
+              const x = lng;
+              const y = lat;
+              const looksProjected =
+                x >= 150000 && x <= 900000 && y >= 0 && y <= 12000000;
+
+              if (looksProjected) {
+                const system = resolveProjectedSystem(x, y);
+                console.warn(
+                  `⚠️ Fila ${i + 1}: columnas lat/lng fuera de rango geográfico, se interpretan como X/Y (${system}).`
+                );
+                coordinates.push({
+                  id: i + 1,
+                  name: pointName,
+                  easting: x,
+                  northing: y,
+                  system,
+                  targetSystem: transformSettings.targetSystem,
+                });
+              } else {
+                hasValidCoords = false;
+                console.warn(
+                  `⚠️ Fila ${i + 1}: lat/lng fuera de rango y no parecen coordenadas proyectadas válidas`
+                );
+              }
+            }
           }
         } else if (coordMap.x !== undefined && coordMap.y !== undefined) {
           const x = parseNumber(row[coordMap.x]);
@@ -284,25 +336,7 @@ const FileUpload = ({ onFileUpload }) => {
 
           if (!isNaN(x) && !isNaN(y)) {
             hasValidCoords = true;
-
-            // Respetar sistema de origen seleccionado; si está en auto, detectar por rangos
-            const detectedProjectedSystem = detectProjectedSystem(x, y);
-            const coordinatesLookGeographic =
-              x >= -180 && x <= 180 && y >= -90 && y <= 90;
-            const forceProjectedFromXY =
-              transformSettings.sourceSystem === "EPSG:4326" &&
-              !coordinatesLookGeographic;
-
-            let system =
-              transformSettings.sourceSystem === "auto" || forceProjectedFromXY
-                ? detectedProjectedSystem
-                : transformSettings.sourceSystem;
-
-            if (forceProjectedFromXY) {
-              console.warn(
-                `⚠️ Fila ${i + 1}: columnas X/Y con valores proyectados detectadas; se ignora EPSG:4326 y se usa ${system}.`
-              );
-            }
+            const system = resolveProjectedSystem(x, y);
 
             coordinates.push({
               id: i + 1,
