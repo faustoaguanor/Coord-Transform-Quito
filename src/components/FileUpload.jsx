@@ -54,7 +54,11 @@ const FileUpload = ({ onFileUpload }) => {
     const headerMap = {};
 
     headers.forEach((header, index) => {
-      const cleanHeader = header.toString().toLowerCase().trim();
+      const cleanHeader = header
+        .toString()
+        .replace(/^\uFEFF/, "")
+        .toLowerCase()
+        .trim();
 
       // Detectar latitud geográfica
       if (cleanHeader.match(/^(lat|latitude|latitud)$/)) {
@@ -93,9 +97,35 @@ const FileUpload = ({ onFileUpload }) => {
     return headerMap;
   };
 
+  const detectDelimiter = (line) => {
+    const candidates = [",", ";", "\t"];
+    const counts = candidates.map((delimiter) => {
+      let count = 0;
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        if (line[i] === '"') {
+          inQuotes = !inQuotes;
+        } else if (line[i] === delimiter && !inQuotes) {
+          count++;
+        }
+      }
+      return { delimiter, count };
+    });
+
+    const best = counts.sort((a, b) => b.count - a.count)[0];
+    return best?.count > 0 ? best.delimiter : ",";
+  };
+
   // Función mejorada para parsear CSV
   const parseCSV = (text) => {
-    const lines = text.split("\n").filter((line) => line.trim());
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line);
+
+    if (lines.length === 0) return [];
+
+    const delimiter = detectDelimiter(lines[0]);
     const result = [];
 
     for (const line of lines) {
@@ -108,7 +138,7 @@ const FileUpload = ({ onFileUpload }) => {
 
         if (char === '"') {
           inQuotes = !inQuotes;
-        } else if ((char === "," || char === ";") && !inQuotes) {
+        } else if (char === delimiter && !inQuotes) {
           row.push(current.trim());
           current = "";
         } else {
