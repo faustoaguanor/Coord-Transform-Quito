@@ -55,14 +55,6 @@ const MapComponent = ({ coordinates = [] }) => {
       maxZoom: 19,
       maxNativeZoom: 17, // OpenTopoMap solo publica tiles hasta z=17
     },
-    cartodb: {
-      name: "CartoDB Light",
-      url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-      attribution: "© OpenStreetMap contributors © CARTO",
-      subdomains: "abcd",
-      maxZoom: 20,
-      maxNativeZoom: 20,
-    },
   };
 
   // Crea una capa base con sus límites de zoom reales y manejo de errores de tiles.
