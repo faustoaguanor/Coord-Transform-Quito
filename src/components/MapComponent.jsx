@@ -17,37 +17,84 @@ const MapComponent = ({ coordinates = [] }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
+  const baseLayerRef = useRef(null);
+  const tileErrorCountRef = useRef(0);
   const wmsLayersRef = useRef([]); // Usar ref para las capas WMS
   const [wmsLayers, setWmsLayers] = useState([]); // Estado solo para UI
   const [currentBaseLayer, setCurrentBaseLayer] = useState("osm");
+  const [layerWarning, setLayerWarning] = useState(null);
   const [showWmsForm, setShowWmsForm] = useState(false);
   const [wmsUrl, setWmsUrl] = useState("");
   const [wmsLayersText, setWmsLayersText] = useState("");
   const [wmsName, setWmsName] = useState("");
 
   // Capas base disponibles
+  // maxNativeZoom = nivel real hasta el que el proveedor genera tiles;
+  // maxZoom = hasta dónde se deja hacer zoom (Leaflet amplía el último
+  // tile disponible en vez de pedir tiles que no existen).
   const baseLayers = {
     osm: {
       name: "OpenStreetMap",
       url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       attribution: "© OpenStreetMap contributors",
+      maxZoom: 19,
+      maxNativeZoom: 19,
     },
     satellite: {
       name: "Satélite (Esri)",
       url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       attribution:
         "© Esri, Maxar, GeoEye, Earthstar Geographics, CNES/Airbus DS, USDA, USGS, AeroGRID, IGN, and the GIS User Community",
+      maxZoom: 19,
+      maxNativeZoom: 19,
     },
     topo: {
       name: "Topográfico",
       url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
       attribution: "© OpenTopoMap contributors",
+      maxZoom: 19,
+      maxNativeZoom: 17, // OpenTopoMap solo publica tiles hasta z=17
     },
     cartodb: {
       name: "CartoDB Light",
       url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
       attribution: "© OpenStreetMap contributors © CARTO",
+      subdomains: "abcd",
+      maxZoom: 20,
+      maxNativeZoom: 20,
     },
+  };
+
+  // Crea una capa base con sus límites de zoom reales y manejo de errores de tiles
+  const createBaseLayer = (key) => {
+    const config = baseLayers[key];
+    const layer = L.tileLayer(config.url, {
+      attribution: config.attribution,
+      maxZoom: config.maxZoom ?? 19,
+      maxNativeZoom: config.maxNativeZoom ?? config.maxZoom ?? 19,
+      tileSize: 256,
+      ...(config.subdomains ? { subdomains: config.subdomains } : {}),
+    });
+
+    tileErrorCountRef.current = 0;
+
+    layer.on("tileerror", () => {
+      tileErrorCountRef.current += 1;
+      // Varios tiles fallando seguidos = la capa no tiene cobertura aquí,
+      // no un error puntual de red.
+      if (tileErrorCountRef.current >= 4) {
+        setLayerWarning(
+          `⚠️ La capa "${config.name}" no está respondiendo o no tiene cobertura en este nivel de zoom/ubicación. Prueba alejar el mapa o cambia de capa base.`
+        );
+      }
+    });
+
+    layer.on("tileload", () => {
+      tileErrorCountRef.current = 0;
+      setLayerWarning(null);
+    });
+
+    return layer;
   };
 
   // Inicializar mapa
@@ -62,17 +109,9 @@ const MapComponent = ({ coordinates = [] }) => {
       preferCanvas: false,
     });
 
-    const initialLayer = L.tileLayer(baseLayers[currentBaseLayer].url, {
-      attribution: baseLayers[currentBaseLayer].attribution,
-      maxZoom: 19,
-      tileSize: 256,
-    });
-
-    initialLayer.addTo(map);
     mapInstanceRef.current = map;
 
     map.on("resize", () => {
-      console.log("Map resized");
       map.invalidateSize();
     });
 
@@ -80,33 +119,25 @@ const MapComponent = ({ coordinates = [] }) => {
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
+        baseLayerRef.current = null;
       }
     };
   }, []);
 
-  // Cambiar capa base
+  // Cambiar capa base (también agrega la capa inicial al montar el mapa)
   useEffect(() => {
     if (!mapInstanceRef.current) return;
 
-    // Remover solo capas base, no WMS
-    mapInstanceRef.current.eachLayer((layer) => {
-      if (
-        layer._url &&
-        layer._url.includes("tile") &&
-        layer.options &&
-        layer.options.attribution
-      ) {
-        mapInstanceRef.current.removeLayer(layer);
-      }
-    });
+    setLayerWarning(null);
 
-    const newLayer = L.tileLayer(baseLayers[currentBaseLayer].url, {
-      attribution: baseLayers[currentBaseLayer].attribution,
-      maxZoom: 19,
-      tileSize: 256,
-    });
+    if (baseLayerRef.current) {
+      mapInstanceRef.current.removeLayer(baseLayerRef.current);
+      baseLayerRef.current = null;
+    }
 
+    const newLayer = createBaseLayer(currentBaseLayer);
     newLayer.addTo(mapInstanceRef.current);
+    baseLayerRef.current = newLayer;
   }, [currentBaseLayer]);
 
   // Actualizar marcadores
@@ -339,6 +370,19 @@ const MapComponent = ({ coordinates = [] }) => {
               ))}
             </select>
           </div>
+
+          {layerWarning && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded text-xs text-amber-800">
+              <span>{layerWarning}</span>
+              <button
+                onClick={() => setLayerWarning(null)}
+                className="text-amber-600 hover:text-amber-900 font-bold"
+                title="Cerrar aviso"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* Botones de control */}
           <div className="flex items-center space-x-2">
