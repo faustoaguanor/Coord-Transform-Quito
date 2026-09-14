@@ -45,8 +45,11 @@ const MapComponent = ({ coordinates = [] }) => {
       url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       attribution:
         "© Esri, Maxar, GeoEye, Earthstar Geographics, CNES/Airbus DS, USDA, USGS, AeroGRID, IGN, and the GIS User Community",
-      maxZoom: 19,
-      maxNativeZoom: 19,
+      // Esri solo tiene imágenes de muy alta resolución en zonas selectas
+      // (grandes ciudades de EE.UU. principalmente); z=19 se ve en blanco
+      // o pixelado en la mayoría del mundo. z=18 es el tope confiable.
+      maxZoom: 18,
+      maxNativeZoom: 18,
     },
     topo: {
       name: "Topográfico",
