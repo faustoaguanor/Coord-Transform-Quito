@@ -65,7 +65,10 @@ const MapComponent = ({ coordinates = [] }) => {
     },
   };
 
-  // Crea una capa base con sus límites de zoom reales y manejo de errores de tiles
+  // Crea una capa base con sus límites de zoom reales y manejo de errores de tiles.
+  // Cubre dos formas de fallo distintas: tiles que responden con error
+  // (tileerror, p.ej. bloqueados por un adblocker) y tiles que nunca
+  // responden (bloqueo silencioso a nivel DNS/firewall, sin evento de error).
   const createBaseLayer = (key) => {
     const config = baseLayers[key];
     const layer = L.tileLayer(config.url, {
@@ -77,22 +80,38 @@ const MapComponent = ({ coordinates = [] }) => {
     });
 
     tileErrorCountRef.current = 0;
+    let hasLoadedAnyTile = false;
 
-    layer.on("tileerror", () => {
+    layer.on("tileerror", (e) => {
       tileErrorCountRef.current += 1;
-      // Varios tiles fallando seguidos = la capa no tiene cobertura aquí,
-      // no un error puntual de red.
-      if (tileErrorCountRef.current >= 4) {
+      console.warn(
+        `[Mapa] Tile fallido en la capa "${config.name}":`,
+        e.tile?.src || e
+      );
+      if (tileErrorCountRef.current >= 2) {
         setLayerWarning(
-          `⚠️ La capa "${config.name}" no está respondiendo o no tiene cobertura en este nivel de zoom/ubicación. Prueba alejar el mapa o cambia de capa base.`
+          `⚠️ La capa "${config.name}" no está cargando tiles. Puede estar bloqueada por un bloqueador de anuncios/privacidad o un filtro de red (DNS/firewall). Revisa la consola (F12) o prueba con otra capa base.`
         );
       }
     });
 
     layer.on("tileload", () => {
+      hasLoadedAnyTile = true;
       tileErrorCountRef.current = 0;
       setLayerWarning(null);
     });
+
+    // Bloqueo silencioso: la petición ni siquiera falla, solo nunca llega.
+    setTimeout(() => {
+      if (!hasLoadedAnyTile && baseLayerRef.current === layer) {
+        console.warn(
+          `[Mapa] La capa "${config.name}" no cargó ningún tile en 8s.`
+        );
+        setLayerWarning(
+          `⚠️ La capa "${config.name}" no respondió. Puede estar bloqueada por tu red o navegador. Prueba con otra capa base (OpenStreetMap suele ser la más confiable).`
+        );
+      }
+    }, 8000);
 
     return layer;
   };
