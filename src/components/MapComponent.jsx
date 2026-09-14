@@ -1,5 +1,6 @@
 import L from "leaflet";
 import { useEffect, useRef, useState } from "react";
+import { transformCoordinate } from "../utils/coordinateTransformations";
 
 // Configurar iconos de Leaflet para que funcionen correctamente
 delete L.Icon.Default.prototype._getIconUrl;
@@ -16,37 +17,98 @@ const MapComponent = ({ coordinates = [] }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
+  const baseLayerRef = useRef(null);
+  const tileErrorCountRef = useRef(0);
   const wmsLayersRef = useRef([]); // Usar ref para las capas WMS
   const [wmsLayers, setWmsLayers] = useState([]); // Estado solo para UI
   const [currentBaseLayer, setCurrentBaseLayer] = useState("osm");
+  const [layerWarning, setLayerWarning] = useState(null);
   const [showWmsForm, setShowWmsForm] = useState(false);
   const [wmsUrl, setWmsUrl] = useState("");
   const [wmsLayersText, setWmsLayersText] = useState("");
   const [wmsName, setWmsName] = useState("");
 
   // Capas base disponibles
+  // maxNativeZoom = nivel real hasta el que el proveedor genera tiles;
+  // maxZoom = hasta dónde se deja hacer zoom (Leaflet amplía el último
+  // tile disponible en vez de pedir tiles que no existen).
   const baseLayers = {
     osm: {
       name: "OpenStreetMap",
       url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       attribution: "© OpenStreetMap contributors",
+      maxZoom: 19,
+      maxNativeZoom: 19,
     },
     satellite: {
       name: "Satélite (Esri)",
       url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       attribution:
         "© Esri, Maxar, GeoEye, Earthstar Geographics, CNES/Airbus DS, USDA, USGS, AeroGRID, IGN, and the GIS User Community",
+      // Esri solo tiene imágenes de muy alta resolución en zonas selectas
+      // (grandes ciudades de EE.UU. principalmente); z=19 se ve en blanco
+      // o pixelado en la mayoría del mundo. z=18 es el tope confiable.
+      maxZoom: 18,
+      maxNativeZoom: 18,
     },
     topo: {
       name: "Topográfico",
       url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
       attribution: "© OpenTopoMap contributors",
+      maxZoom: 19,
+      maxNativeZoom: 17, // OpenTopoMap solo publica tiles hasta z=17
     },
-    cartodb: {
-      name: "CartoDB Light",
-      url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-      attribution: "© OpenStreetMap contributors © CARTO",
-    },
+  };
+
+  // Crea una capa base con sus límites de zoom reales y manejo de errores de tiles.
+  // Cubre dos formas de fallo distintas: tiles que responden con error
+  // (tileerror, p.ej. bloqueados por un adblocker) y tiles que nunca
+  // responden (bloqueo silencioso a nivel DNS/firewall, sin evento de error).
+  const createBaseLayer = (key) => {
+    const config = baseLayers[key];
+    const layer = L.tileLayer(config.url, {
+      attribution: config.attribution,
+      maxZoom: config.maxZoom ?? 19,
+      maxNativeZoom: config.maxNativeZoom ?? config.maxZoom ?? 19,
+      tileSize: 256,
+      ...(config.subdomains ? { subdomains: config.subdomains } : {}),
+    });
+
+    tileErrorCountRef.current = 0;
+    let hasLoadedAnyTile = false;
+
+    layer.on("tileerror", (e) => {
+      tileErrorCountRef.current += 1;
+      console.warn(
+        `[Mapa] Tile fallido en la capa "${config.name}":`,
+        e.tile?.src || e
+      );
+      if (tileErrorCountRef.current >= 2) {
+        setLayerWarning(
+          `⚠️ La capa "${config.name}" no está cargando tiles. Puede estar bloqueada por un bloqueador de anuncios/privacidad o un filtro de red (DNS/firewall). Revisa la consola (F12) o prueba con otra capa base.`
+        );
+      }
+    });
+
+    layer.on("tileload", () => {
+      hasLoadedAnyTile = true;
+      tileErrorCountRef.current = 0;
+      setLayerWarning(null);
+    });
+
+    // Bloqueo silencioso: la petición ni siquiera falla, solo nunca llega.
+    setTimeout(() => {
+      if (!hasLoadedAnyTile && baseLayerRef.current === layer) {
+        console.warn(
+          `[Mapa] La capa "${config.name}" no cargó ningún tile en 8s.`
+        );
+        setLayerWarning(
+          `⚠️ La capa "${config.name}" no respondió. Puede estar bloqueada por tu red o navegador. Prueba con otra capa base (OpenStreetMap suele ser la más confiable).`
+        );
+      }
+    }, 8000);
+
+    return layer;
   };
 
   // Inicializar mapa
@@ -61,17 +123,9 @@ const MapComponent = ({ coordinates = [] }) => {
       preferCanvas: false,
     });
 
-    const initialLayer = L.tileLayer(baseLayers[currentBaseLayer].url, {
-      attribution: baseLayers[currentBaseLayer].attribution,
-      maxZoom: 19,
-      tileSize: 256,
-    });
-
-    initialLayer.addTo(map);
     mapInstanceRef.current = map;
 
     map.on("resize", () => {
-      console.log("Map resized");
       map.invalidateSize();
     });
 
@@ -79,33 +133,25 @@ const MapComponent = ({ coordinates = [] }) => {
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
+        baseLayerRef.current = null;
       }
     };
   }, []);
 
-  // Cambiar capa base
+  // Cambiar capa base (también agrega la capa inicial al montar el mapa)
   useEffect(() => {
     if (!mapInstanceRef.current) return;
 
-    // Remover solo capas base, no WMS
-    mapInstanceRef.current.eachLayer((layer) => {
-      if (
-        layer._url &&
-        layer._url.includes("tile") &&
-        layer.options &&
-        layer.options.attribution
-      ) {
-        mapInstanceRef.current.removeLayer(layer);
-      }
-    });
+    setLayerWarning(null);
 
-    const newLayer = L.tileLayer(baseLayers[currentBaseLayer].url, {
-      attribution: baseLayers[currentBaseLayer].attribution,
-      maxZoom: 19,
-      tileSize: 256,
-    });
+    if (baseLayerRef.current) {
+      mapInstanceRef.current.removeLayer(baseLayerRef.current);
+      baseLayerRef.current = null;
+    }
 
+    const newLayer = createBaseLayer(currentBaseLayer);
     newLayer.addTo(mapInstanceRef.current);
+    baseLayerRef.current = newLayer;
   }, [currentBaseLayer]);
 
   // Actualizar marcadores
@@ -124,9 +170,22 @@ const MapComponent = ({ coordinates = [] }) => {
     coordinates.forEach((coord, index) => {
       let lat, lng;
 
-      if (coord.transformation?.source) {
-        lat = coord.transformation.source.y;
-        lng = coord.transformation.source.x;
+      const source = coord.transformation?.source;
+
+      // El mapa (Leaflet) siempre necesita lat/lng en WGS84 (EPSG:4326).
+      // Las coordenadas "source" pueden estar en UTM o SIRES-DMQ (metros),
+      // así que hay que convertirlas antes de ubicarlas en el mapa.
+      if (source && typeof source.x === "number" && typeof source.y === "number") {
+        if (source.crs === "EPSG:4326") {
+          lat = source.y;
+          lng = source.x;
+        } else {
+          const geo = transformCoordinate(source.x, source.y, source.crs, "EPSG:4326");
+          if (geo.success) {
+            lat = geo.y;
+            lng = geo.x;
+          }
+        }
       } else if (coord.coordinates) {
         lat = coord.coordinates.latitude;
         lng = coord.coordinates.longitude;
@@ -138,7 +197,16 @@ const MapComponent = ({ coordinates = [] }) => {
         lng = coord.longitude;
       }
 
-      if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+      if (
+        typeof lat === "number" &&
+        typeof lng === "number" &&
+        !isNaN(lat) &&
+        !isNaN(lng) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lng >= -180 &&
+        lng <= 180
+      ) {
         const marker = L.marker([lat, lng]);
 
         const popupContent = `
@@ -316,6 +384,19 @@ const MapComponent = ({ coordinates = [] }) => {
               ))}
             </select>
           </div>
+
+          {layerWarning && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded text-xs text-amber-800">
+              <span>{layerWarning}</span>
+              <button
+                onClick={() => setLayerWarning(null)}
+                className="text-amber-600 hover:text-amber-900 font-bold"
+                title="Cerrar aviso"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* Botones de control */}
           <div className="flex items-center space-x-2">
