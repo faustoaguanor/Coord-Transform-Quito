@@ -1,5 +1,6 @@
 import L from "leaflet";
 import { useEffect, useRef, useState } from "react";
+import { transformCoordinate } from "../utils/coordinateTransformations";
 
 // Configurar iconos de Leaflet para que funcionen correctamente
 delete L.Icon.Default.prototype._getIconUrl;
@@ -124,9 +125,22 @@ const MapComponent = ({ coordinates = [] }) => {
     coordinates.forEach((coord, index) => {
       let lat, lng;
 
-      if (coord.transformation?.source) {
-        lat = coord.transformation.source.y;
-        lng = coord.transformation.source.x;
+      const source = coord.transformation?.source;
+
+      // El mapa (Leaflet) siempre necesita lat/lng en WGS84 (EPSG:4326).
+      // Las coordenadas "source" pueden estar en UTM o SIRES-DMQ (metros),
+      // así que hay que convertirlas antes de ubicarlas en el mapa.
+      if (source && typeof source.x === "number" && typeof source.y === "number") {
+        if (source.crs === "EPSG:4326") {
+          lat = source.y;
+          lng = source.x;
+        } else {
+          const geo = transformCoordinate(source.x, source.y, source.crs, "EPSG:4326");
+          if (geo.success) {
+            lat = geo.y;
+            lng = geo.x;
+          }
+        }
       } else if (coord.coordinates) {
         lat = coord.coordinates.latitude;
         lng = coord.coordinates.longitude;
@@ -138,7 +152,16 @@ const MapComponent = ({ coordinates = [] }) => {
         lng = coord.longitude;
       }
 
-      if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+      if (
+        typeof lat === "number" &&
+        typeof lng === "number" &&
+        !isNaN(lat) &&
+        !isNaN(lng) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lng >= -180 &&
+        lng <= 180
+      ) {
         const marker = L.marker([lat, lng]);
 
         const popupContent = `
