@@ -23,12 +23,8 @@ updates:
     schedule:
       interval: monthly
     ignore:
-      # Solo versiones LTS de Node.js (pares). Las impares ("Current")
-      # pierden soporte en ~6 meses y no son aptas para producción.
+      # Node.js: solo parches dentro de la versión LTS actual (22). Los saltos
+      # de versión mayor se hacen a mano y solo a LTS (pares: 24, 26...); las
+      # impares ("Current") pierden soporte en ~6 meses.
       - dependency-name: node
-        versions:
-          - ">=23.0.0 <24.0.0"
-          - ">=25.0.0 <26.0.0"
-          - ">=27.0.0 <28.0.0"
-          - ">=29.0.0 <30.0.0"
-          - ">=31.0.0 <32.0.0"
+        update-types: ["version-update:semver-major"]
