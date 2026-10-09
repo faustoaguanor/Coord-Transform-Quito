@@ -1,0 +1,6 @@
+# Toda modificación requiere revisión del responsable del repositorio.
+*                                   @faustoaguanor
+
+# Núcleo geodésico: cambios críticos para la precisión catastral
+/src/utils/coordinateTransformations.js @faustoaguanor
+/src/utils/__tests__/fixtures/          @faustoaguanor

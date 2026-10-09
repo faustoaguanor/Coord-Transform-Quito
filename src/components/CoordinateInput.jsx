@@ -6,10 +6,48 @@ import {
   dmsToDecimal,
   formatCoordinate,
   getEcuadorSystems,
+  parseNumber,
   transformCoordinate,
   validateCoordinates,
+  validateDMS,
   validateProjectedCoordinates,
 } from "../utils/coordinateTransformations";
+
+// Lee las coordenadas geográficas del formulario (decimal o DMS).
+// Usa parseNumber para aceptar coma decimal ("-0,2201"), habitual en Ecuador.
+const readGeographicInput = (inputMode, formData) => {
+  if (inputMode === "decimal") {
+    return {
+      lat: parseNumber(formData.latitude),
+      lng: parseNumber(formData.longitude),
+      errors: [],
+    };
+  }
+
+  const errors = [];
+  const readDMS = (prefix, type, direction) => {
+    const d = formData[`${prefix}Degrees`];
+    const m = formData[`${prefix}Minutes`];
+    const s = formData[`${prefix}Seconds`];
+    if (d === "" || m === "" || s === "") return NaN;
+    const validation = validateDMS(d, m, s, type);
+    if (!validation.isValid) {
+      errors.push(
+        ...validation.errors.map(
+          (e) => `${type === "lat" ? "Latitud" : "Longitud"}: ${e}`
+        )
+      );
+      return NaN;
+    }
+    return dmsToDecimal(parseNumber(d), parseNumber(m), parseNumber(s), direction);
+  };
+
+  return {
+    lat: readDMS("lat", "lat", formData.latDirection),
+    lng: readDMS("lng", "lng", formData.lngDirection),
+    errors,
+  };
+};
 
 const CoordinateInput = ({ onTransform, isProcessing = false }) => {
   const [inputMode, setInputMode] = useState("decimal"); // 'decimal', 'dms', 'projected'
@@ -44,48 +82,36 @@ const CoordinateInput = ({ onTransform, isProcessing = false }) => {
 
   // Real-time validation and preview
   useEffect(() => {
-    let lat, lng;
-
     // Resetear errores al inicio
     setErrors({});
 
-    if (inputMode === "decimal") {
-      lat = parseFloat(formData.latitude);
-      lng = parseFloat(formData.longitude);
-    } else if (inputMode === "dms") {
-      if (
-        formData.latDegrees &&
-        formData.latMinutes &&
-        formData.latSeconds !== ""
-      ) {
-        lat = dmsToDecimal(
-          parseInt(formData.latDegrees),
-          parseInt(formData.latMinutes),
-          parseFloat(formData.latSeconds),
-          formData.latDirection
-        );
+    let lat = NaN;
+    let lng = NaN;
+    if (inputMode !== "projected") {
+      const geographic = readGeographicInput(inputMode, formData);
+      if (geographic.errors.length > 0) {
+        setErrors({ coordinates: geographic.errors.join(", ") });
+        setPreviewResult(null);
+        return;
       }
-      if (
-        formData.lngDegrees &&
-        formData.lngMinutes &&
-        formData.lngSeconds !== ""
-      ) {
-        lng = dmsToDecimal(
-          parseInt(formData.lngDegrees),
-          parseInt(formData.lngMinutes),
-          parseFloat(formData.lngSeconds),
-          formData.lngDirection
-        );
+      ({ lat, lng } = geographic);
+
+      // Informar formato incorrecto en lugar de ignorarlo en silencio
+      if (inputMode === "decimal") {
+        const invalid = [];
+        if (formData.latitude.trim() && isNaN(lat)) invalid.push("latitud");
+        if (formData.longitude.trim() && isNaN(lng)) invalid.push("longitud");
+        if (invalid.length > 0) {
+          setErrors({
+            coordinates: `Formato numérico inválido en ${invalid.join(" y ")} (use p. ej. -0.2201 o -0,2201)`,
+          });
+          setPreviewResult(null);
+          return;
+        }
       }
     }
 
-    if (
-      inputMode !== "projected" &&
-      !isNaN(lat) &&
-      !isNaN(lng) &&
-      lat !== 0 &&
-      lng !== 0
-    ) {
+    if (inputMode !== "projected" && !isNaN(lat) && !isNaN(lng)) {
       setIsValidating(true);
 
       try {
@@ -139,10 +165,16 @@ const CoordinateInput = ({ onTransform, isProcessing = false }) => {
       setIsValidating(true);
 
       try {
-        const easting = parseFloat(formData.easting);
-        const northing = parseFloat(formData.northing);
+        const easting = parseNumber(formData.easting);
+        const northing = parseNumber(formData.northing);
 
-        if (!isNaN(easting) && !isNaN(northing)) {
+        if (isNaN(easting) || isNaN(northing)) {
+          setErrors({
+            coordinates:
+              "Formato numérico inválido en Este/Norte (use p. ej. 498630.15 o 498630,15)",
+          });
+          setPreviewResult(null);
+        } else {
           const validation = validateProjectedCoordinates(
             easting,
             northing,
@@ -243,33 +275,15 @@ const CoordinateInput = ({ onTransform, isProcessing = false }) => {
       transformationData = {
         type: "manual",
         inputType: "projected",
-        easting: parseFloat(formData.easting),
-        northing: parseFloat(formData.northing),
+        easting: parseNumber(formData.easting),
+        northing: parseNumber(formData.northing),
         system: formData.sourceSystem,
         name: formData.pointName || `Punto ${Date.now()}`,
         description: formData.description,
         targetSystem: formData.targetSystem,
       };
     } else {
-      let lat, lng;
-
-      if (inputMode === "decimal") {
-        lat = parseFloat(formData.latitude);
-        lng = parseFloat(formData.longitude);
-      } else {
-        lat = dmsToDecimal(
-          parseInt(formData.latDegrees),
-          parseInt(formData.latMinutes),
-          parseFloat(formData.latSeconds),
-          formData.latDirection
-        );
-        lng = dmsToDecimal(
-          parseInt(formData.lngDegrees),
-          parseInt(formData.lngMinutes),
-          parseFloat(formData.lngSeconds),
-          formData.lngDirection
-        );
-      }
+      const { lat, lng } = readGeographicInput(inputMode, formData);
 
       transformationData = {
         type: "manual",
@@ -345,8 +359,8 @@ const CoordinateInput = ({ onTransform, isProcessing = false }) => {
       setInputMode("projected");
       setFormData((prev) => ({
         ...prev,
-        easting: "776392",
-        northing: "9975341",
+        easting: "776904.297",
+        northing: "9975649.232",
         sourceSystem: "UTM-17S",
         targetSystem: "SIRES-DMQ",
         pointName: "UTM a SIRES",
@@ -355,8 +369,8 @@ const CoordinateInput = ({ onTransform, isProcessing = false }) => {
       setInputMode("projected");
       setFormData((prev) => ({
         ...prev,
-        easting: "499450",
-        northing: "9975663",
+        easting: "498630.153",
+        northing: "9975651.444",
         sourceSystem: "SIRES-DMQ",
         targetSystem: "UTM-17S",
         pointName: "SIRES a UTM",
