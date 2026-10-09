@@ -8,11 +8,27 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+
+  # Todas las acciones del CI en un único PR mensual
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # Solo versiones LTS de Node.js (pares). Las impares ("Current")
+      # pierden soporte en ~6 meses y no son aptas para producción.
+      - dependency-name: node
+        versions:
+          - ">=23.0.0 <24.0.0"
+          - ">=25.0.0 <26.0.0"
+          - ">=27.0.0 <28.0.0"
+          - ">=29.0.0 <30.0.0"
+          - ">=31.0.0 <32.0.0"
