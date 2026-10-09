@@ -20,7 +20,7 @@ RUN npm run build
 
 # ---------- Etapa 2: servidor web ----------
 # nginx sin privilegios de root, escucha en el puerto 8080
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 
 LABEL org.opencontainers.image.title="Coord-Transform-Quito" \
       org.opencontainers.image.description="Transformador de coordenadas WGS84 / SIRES-DMQ / UTM 17-18 para el DMQ" \
