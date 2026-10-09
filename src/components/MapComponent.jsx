@@ -1,5 +1,10 @@
 import L from "leaflet";
 import { useEffect, useRef, useState } from "react";
+import {
+  formatWithUnits,
+  getResultWGS84,
+} from "../utils/coordinateTransformations";
+import { escapeXML as escapeHTML } from "../utils/exporters";
 
 // Configurar iconos de Leaflet para que funcionen correctamente
 delete L.Icon.Default.prototype._getIconUrl;
@@ -122,30 +127,23 @@ const MapComponent = ({ coordinates = [] }) => {
     const validCoordinates = [];
 
     coordinates.forEach((coord, index) => {
-      let lat, lng;
+      // Leaflet necesita WGS84: si el origen es proyectado (UTM/SIRES) se
+      // convierte; antes se usaban metros como grados y el marcador se perdía.
+      const wgs84 =
+        coord.latitude !== undefined && coord.longitude !== undefined
+          ? { lat: coord.latitude, lng: coord.longitude }
+          : getResultWGS84(coord);
+      const lat = wgs84?.lat;
+      const lng = wgs84?.lng;
 
-      if (coord.transformation?.source) {
-        lat = coord.transformation.source.y;
-        lng = coord.transformation.source.x;
-      } else if (coord.coordinates) {
-        lat = coord.coordinates.latitude;
-        lng = coord.coordinates.longitude;
-      } else if (
-        coord.latitude !== undefined &&
-        coord.longitude !== undefined
-      ) {
-        lat = coord.latitude;
-        lng = coord.longitude;
-      }
-
-      if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
         const marker = L.marker([lat, lng]);
 
         const popupContent = `
           <div class="p-2">
-            <h4 class="font-bold text-lg mb-2">${
+            <h4 class="font-bold text-lg mb-2">${escapeHTML(
               coord.name || `Punto ${index + 1}`
-            }</h4>
+            )}</h4>
             <div class="text-sm space-y-1">
               <div><strong>Latitud:</strong> ${lat.toFixed(6)}°</div>
               <div><strong>Longitud:</strong> ${lng.toFixed(6)}°</div>
@@ -153,34 +151,17 @@ const MapComponent = ({ coordinates = [] }) => {
                 coord.transformation?.target
                   ? `
                 <div class="mt-2 pt-2 border-t">
-                  <div><strong>Sistema:</strong> ${
+                  <div><strong>Sistema:</strong> ${escapeHTML(
                     coord.transformation.target.crs
-                  }</div>
-                  <div><strong>Este:</strong> ${coord.transformation.target.x.toFixed(
-                    2
-                  )} m</div>
-                  <div><strong>Norte:</strong> ${coord.transformation.target.y.toFixed(
-                    2
-                  )} m</div>
-                </div>
-              `
-                  : ""
-              }
-              ${
-                coord.precision
-                  ? `
-                <div class="mt-1">
-                  <span class="px-2 py-1 text-xs rounded ${
-                    coord.precision.quality === "Excelente"
-                      ? "bg-green-100 text-green-800"
-                      : coord.precision.quality === "Muy buena"
-                      ? "bg-blue-100 text-blue-800"
-                      : coord.precision.quality === "Buena"
-                      ? "bg-yellow-100 text-yellow-800"
-                      : "bg-red-100 text-red-800"
-                  }">
-                    Precisión: ${coord.precision.quality}
-                  </span>
+                  )}</div>
+                  <div><strong>X:</strong> ${formatWithUnits(
+                    coord.transformation.target.x,
+                    coord.transformation.target.crs
+                  )}</div>
+                  <div><strong>Y:</strong> ${formatWithUnits(
+                    coord.transformation.target.y,
+                    coord.transformation.target.crs
+                  )}</div>
                 </div>
               `
                   : ""

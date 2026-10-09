@@ -1,0 +1,28 @@
+name: Reporte de error
+description: Una transformación da un resultado incorrecto o la aplicación falla
+labels: [bug]
+body:
+  - type: textarea
+    id: descripcion
+    attributes:
+      label: ¿Qué ocurrió?
+    validations:
+      required: true
+  - type: input
+    id: origen
+    attributes:
+      label: Coordenada y sistema de origen
+      placeholder: "776904.297, 9975649.232 (UTM-17S)"
+  - type: input
+    id: destino
+    attributes:
+      label: Sistema destino, resultado obtenido y resultado esperado
+      placeholder: "SIRES-DMQ → obtuve X, esperaba Y (fuente: …)"
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Pasos para reproducir
+  - type: input
+    id: navegador
+    attributes:
+      label: Navegador y versión

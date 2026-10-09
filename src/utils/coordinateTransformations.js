@@ -1,12 +1,17 @@
 // src/utils/coordinateTransformations.js
+// Motor de transformaciones de coordenadas para Ecuador / DMQ.
+// Las funciones de este módulo son puras (sin DOM) salvo copyToClipboard,
+// para que puedan probarse con Vitest. Ver docs/TECNICO.md.
 import proj4 from "proj4";
 
-// Sistemas de coordenadas para Ecuador
-const COORDINATE_SYSTEMS = {
+// Definiciones PROJ de los sistemas soportados
+export const COORDINATE_SYSTEMS = {
   // Geográficas
   "EPSG:4326": "+proj=longlat +datum=WGS84 +no_defs",
 
-  // SIRES-DMQ (Sistema oficial de Quito)
+  // SIRES-DMQ (Sistema oficial de Quito). Transversa de Mercator local sobre
+  // el elipsoide WGS84, meridiano central -78.5° y factor de escala
+  // 1.0004584 (compensa la altura media de Quito, ~2900 m).
   "SIRES-DMQ":
     "+proj=tmerc +lat_0=0 +lon_0=-78.5 +k=1.0004584 +x_0=500000 +y_0=10000000 +ellps=WGS84 +datum=WGS84 +units=m +no_defs",
 
@@ -17,61 +22,85 @@ const COORDINATE_SYSTEMS = {
   "UTM-18S": "+proj=utm +zone=18 +south +datum=WGS84 +units=m +no_defs",
 };
 
+// Códigos EPSG equivalentes (SIRES-DMQ no tiene código EPSG oficial)
+export const EPSG_CODES = {
+  "EPSG:4326": 4326,
+  "SIRES-DMQ": null,
+  "UTM-17N": 32617,
+  "UTM-17S": 32717,
+  "UTM-18N": 32618,
+  "UTM-18S": 32718,
+};
+
+export const SUPPORTED_SYSTEMS = Object.keys(COORDINATE_SYSTEMS);
+
 // Registrar proyecciones
 Object.entries(COORDINATE_SYSTEMS).forEach(([code, definition]) => {
   proj4.defs(code, definition);
 });
 
+export const isGeographicCRS = (crs) => crs === "EPSG:4326";
+
+// Decimales recomendados: 8 en grados (~1 mm), 3 en metros (1 mm)
+export const getDecimalsForCRS = (crs) => (isGeographicCRS(crs) ? 8 : 3);
+
+// Formatea un valor según las unidades del sistema; "" si no es numérico.
+export const formatForCRS = (value, crs) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(getDecimalsForCRS(crs))
+    : "";
+
+const NUMBER_PATTERN = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+
 // Función para normalizar números (manejo de puntos y comas)
 export const parseNumber = (value) => {
-  if (typeof value === "number") return value;
-  if (typeof value !== "string" && typeof value !== "number") return NaN;
+  if (typeof value === "number") return Number.isFinite(value) ? value : NaN;
+  if (typeof value !== "string") return NaN;
 
-  let cleaned = value.toString().trim();
+  let cleaned = value.trim().replace(/\s+/g, "");
   if (!cleaned) return NaN;
 
   if (cleaned.includes(".") && cleaned.includes(",")) {
     if (cleaned.lastIndexOf(".") > cleaned.lastIndexOf(",")) {
+      // 1,234.56 (inglés)
       cleaned = cleaned.replace(/,/g, "");
     } else {
+      // 1.234,56 (europeo / latinoamericano)
       cleaned = cleaned.replace(/\./g, "").replace(",", ".");
     }
-  } else if (cleaned.includes(",") && !cleaned.includes(".")) {
+  } else if (cleaned.includes(",")) {
     const commaCount = (cleaned.match(/,/g) || []).length;
     if (commaCount === 1) {
-      const parts = cleaned.split(",");
-      const afterComma = parts[1];
+      const afterComma = cleaned.split(",")[1];
       if (afterComma && afterComma.length <= 6 && /^\d+$/.test(afterComma)) {
+        // Coma decimal: -78,5123
         cleaned = cleaned.replace(",", ".");
       } else {
         cleaned = cleaned.replace(/,/g, "");
       }
     } else {
+      // Varias comas: separadores de miles (1,234,567)
       cleaned = cleaned.replace(/,/g, "");
     }
-  } else if (cleaned.includes(".") && !cleaned.includes(",")) {
-    const dotCount = (cleaned.match(/\./g) || []).length;
-    if (dotCount > 1) {
-      const lastDotIndex = cleaned.lastIndexOf(".");
-      const afterLastDot = cleaned.substring(lastDotIndex + 1);
-      if (afterLastDot.length <= 3 && /^\d+$/.test(afterLastDot)) {
-        cleaned = cleaned.replace(/\./g, "");
-        cleaned =
-          cleaned.slice(0, lastDotIndex - (dotCount - 1)) + "." + afterLastDot;
-      } else {
-        cleaned = cleaned.replace(/\./g, "");
-      }
-    }
+  } else if ((cleaned.match(/\./g) || []).length > 1) {
+    // Varios puntos: separadores de miles (9.975.649)
+    cleaned = cleaned.replace(/\./g, "");
   }
 
-  const result = parseFloat(cleaned);
-  return isNaN(result) ? NaN : result;
+  // Rechazar basura como "12abc" o "1-2" en lugar de truncar silenciosamente
+  if (!NUMBER_PATTERN.test(cleaned)) return NaN;
+
+  const result = Number(cleaned);
+  return Number.isFinite(result) ? result : NaN;
 };
 
-// Configuración de sistemas disponibles
+// Configuración de sistemas disponibles.
+// Los ejemplos corresponden a la Plaza Grande (-0.2201, -78.5123) y fueron
+// verificados con PROJ 9 (pyproj); ver src/utils/__tests__/.
 export const getEcuadorSystems = () => [
   {
     code: "EPSG:4326",
+    epsg: 4326,
     name: "Geográficas (WGS84)",
     shortName: "Geographic",
     type: "geographic",
@@ -82,6 +111,7 @@ export const getEcuadorSystems = () => [
   },
   {
     code: "SIRES-DMQ",
+    epsg: null,
     name: "SIRES-DMQ (Quito)",
     shortName: "SIRES-DMQ",
     type: "projected",
@@ -89,56 +119,70 @@ export const getEcuadorSystems = () => [
     description:
       "Sistema de Referencia Espacial del Distrito Metropolitano de Quito",
     region: "Quito Metropolitano",
-    example: { easting: 499450, northing: 9975663 },
+    example: { easting: 498630.153, northing: 9975651.444 },
   },
   {
     code: "UTM-17N",
+    epsg: 32617,
     name: "UTM Zona 17 Norte",
     shortName: "UTM 17N",
     type: "projected",
     units: "meters",
     description: "UTM 17N - Ecuador septentrional",
     region: "Ecuador Norte",
-    example: { easting: 194617, northing: 24367 },
+    example: { easting: 776904.297, northing: -24350.768 },
   },
   {
     code: "UTM-17S",
+    epsg: 32717,
     name: "UTM Zona 17 Sur",
     shortName: "UTM 17S",
     type: "projected",
     units: "meters",
     description: "UTM 17S - Ecuador occidental (Quito, Guayaquil)",
     region: "Ecuador Occidental",
-    example: { easting: 694617, northing: 9975663 },
+    example: { easting: 776904.297, northing: 9975649.232 },
   },
   {
     code: "UTM-18N",
+    epsg: 32618,
     name: "UTM Zona 18 Norte",
     shortName: "UTM 18N",
     type: "projected",
     units: "meters",
     description: "UTM 18N - Ecuador nororiental",
     region: "Ecuador Noreste",
-    example: { easting: 294617, northing: 24367 },
+    example: { easting: 108925.157, northing: -24373.755 },
   },
   {
     code: "UTM-18S",
+    epsg: 32718,
     name: "UTM Zona 18 Sur",
     shortName: "UTM 18S",
     type: "projected",
     units: "meters",
     description: "UTM 18S - Ecuador oriental (Amazonía)",
     region: "Ecuador Oriental",
-    example: { easting: 794617, northing: 9975663 },
+    example: { easting: 108925.157, northing: 9975626.245 },
   },
 ];
 
 // Convertir grados decimales a DMS
 export const decimalToDMS = (decimal, type = "lat") => {
   const abs = Math.abs(decimal);
-  const degrees = Math.floor(abs);
-  const minutes = Math.floor((abs - degrees) * 60);
-  const seconds = ((abs - degrees) * 60 - minutes) * 60;
+  let degrees = Math.floor(abs);
+  let minutes = Math.floor((abs - degrees) * 60);
+  let seconds = Number((((abs - degrees) * 60 - minutes) * 60).toFixed(3));
+
+  // Evitar resultados como 59' 60.000"
+  if (seconds >= 60) {
+    seconds -= 60;
+    minutes += 1;
+  }
+  if (minutes >= 60) {
+    minutes -= 60;
+    degrees += 1;
+  }
 
   let direction;
   if (type === "lat") {
@@ -150,7 +194,7 @@ export const decimalToDMS = (decimal, type = "lat") => {
   return {
     degrees,
     minutes,
-    seconds: parseFloat(seconds.toFixed(3)),
+    seconds,
     direction,
     formatted: `${degrees}° ${minutes}' ${seconds.toFixed(3)}" ${direction}`,
     decimal: decimal,
@@ -167,23 +211,59 @@ export const dmsToDecimal = (degrees, minutes, seconds, direction) => {
   return decimal;
 };
 
-// Auto-detectar mejor sistema para Ecuador (CORREGIDO)
+// Validar componentes DMS (minutos/segundos en [0, 60))
+export const validateDMS = (degrees, minutes, seconds, type = "lat") => {
+  const errors = [];
+  const values = [degrees, minutes, seconds].map((v) =>
+    typeof v === "string" ? parseNumber(v) : v
+  );
+  const [d, m, s] = values;
+  const maxDegrees = type === "lat" ? 90 : 180;
+
+  if (values.some((v) => typeof v !== "number" || Number.isNaN(v))) {
+    errors.push("Grados, minutos y segundos deben ser números válidos");
+  } else {
+    if (d < 0 || d > maxDegrees) {
+      errors.push(`Grados deben estar entre 0 y ${maxDegrees}`);
+    }
+    if (m < 0 || m >= 60) errors.push("Minutos deben estar entre 0 y 59");
+    if (s < 0 || s >= 60) errors.push("Segundos deben estar entre 0 y 59.999");
+  }
+
+  return { isValid: errors.length === 0, errors };
+};
+
+// Auto-detectar mejor sistema para Ecuador
 export const detectBestSystem = (lat, lng) => {
   // Para área metropolitana de Quito
   if (lat >= -0.5 && lat <= 0.5 && lng >= -79 && lng <= -78) {
     return "SIRES-DMQ";
   }
 
-  // Para Ecuador por longitud (CORRECTO)
   // Zona 17: -84° a -78° | Zona 18: -78° a -72°
   if (lat >= 0) {
-    // Hemisferio norte
     return lng < -78 ? "UTM-17N" : "UTM-18N";
-  } else {
-    // Hemisferio sur (mayoría de Ecuador)
-    return lng < -78 ? "UTM-17S" : "UTM-18S";
   }
+  return lng < -78 ? "UTM-17S" : "UTM-18S";
 };
+
+// Rangos aceptados por sistema proyectado (Ecuador continental, con margen).
+// Valores fuera de estos rangos casi siempre indican columnas invertidas,
+// sistema de origen equivocado o errores de digitación.
+export const PROJECTED_RANGES = {
+  "SIRES-DMQ": {
+    easting: [450000, 550000],
+    northing: [9950000, 10050000],
+    label: "SIRES-DMQ",
+  },
+  "UTM-17S": { easting: [100000, 900000], northing: [9400000, 10200000] },
+  "UTM-18S": { easting: [100000, 900000], northing: [9400000, 10200000] },
+  "UTM-17N": { easting: [100000, 900000], northing: [-600000, 200000] },
+  "UTM-18N": { easting: [100000, 900000], northing: [-600000, 200000] },
+};
+
+const formatRange = ([min, max]) =>
+  `${min.toLocaleString("es-EC")} – ${max.toLocaleString("es-EC")}`;
 
 // Validar coordenadas geográficas
 export const validateCoordinates = (lat, lng) => {
@@ -191,24 +271,34 @@ export const validateCoordinates = (lat, lng) => {
   const parsedLat = typeof lat === "string" ? parseNumber(lat) : lat;
   const parsedLng = typeof lng === "string" ? parseNumber(lng) : lng;
 
-  if (typeof parsedLat !== "number" || isNaN(parsedLat)) {
+  const latIsNumber = typeof parsedLat === "number" && !isNaN(parsedLat);
+  const lngIsNumber = typeof parsedLng === "number" && !isNaN(parsedLng);
+
+  if (!latIsNumber) {
     errors.push("Latitud debe ser un número válido");
   } else if (parsedLat < -90 || parsedLat > 90) {
     errors.push("Latitud debe estar entre -90 y 90 grados");
   }
 
-  if (typeof parsedLng !== "number" || isNaN(parsedLng)) {
+  if (!lngIsNumber) {
     errors.push("Longitud debe ser un número válido");
   } else if (parsedLng < -180 || parsedLng > 180) {
     errors.push("Longitud debe estar entre -180 y 180 grados");
   }
 
-  if (!isNaN(parsedLat) && !isNaN(parsedLng)) {
+  if (latIsNumber && lngIsNumber && errors.length === 0) {
     if (parsedLat < -5 || parsedLat > 2) {
       errors.push("Latitud fuera del rango típico de Ecuador (-5° a 2°)");
     }
     if (parsedLng < -92 || parsedLng > -75) {
       errors.push("Longitud fuera del rango típico de Ecuador (-92° a -75°)");
+    }
+    // Ecuador está al oeste de Greenwich: una longitud positiva suele ser un
+    // signo omitido, y valores invertidos suelen ser columnas cruzadas.
+    if (parsedLng > 75 && parsedLng < 92) {
+      errors.push("Longitud positiva: ¿falta el signo negativo (oeste)?");
+    } else if (parsedLat < -75 && parsedLat > -92 && parsedLng > -5) {
+      errors.push("Parece que latitud y longitud están intercambiadas");
     }
   }
 
@@ -228,22 +318,46 @@ export const validateProjectedCoordinates = (easting, northing, system) => {
   const parsedNorthing =
     typeof northing === "string" ? parseNumber(northing) : northing;
 
-  if (typeof parsedEasting !== "number" || isNaN(parsedEasting)) {
-    errors.push("Este debe ser un número válido");
+  const eastingIsNumber =
+    typeof parsedEasting === "number" && !isNaN(parsedEasting);
+  const northingIsNumber =
+    typeof parsedNorthing === "number" && !isNaN(parsedNorthing);
+
+  if (!eastingIsNumber) errors.push("Este debe ser un número válido");
+  if (!northingIsNumber) errors.push("Norte debe ser un número válido");
+
+  const range = PROJECTED_RANGES[system];
+  if (system && !range) {
+    errors.push(`Sistema de coordenadas no soportado: ${system}`);
   }
 
-  if (typeof parsedNorthing !== "number" || isNaN(parsedNorthing)) {
-    errors.push("Norte debe ser un número válido");
-  }
+  if (eastingIsNumber && northingIsNumber && range) {
+    const name = range.label || system;
+    const [eMin, eMax] = range.easting;
+    const [nMin, nMax] = range.northing;
+    const eastingOut = parsedEasting < eMin || parsedEasting > eMax;
+    const northingOut = parsedNorthing < nMin || parsedNorthing > nMax;
 
-  if (!isNaN(parsedEasting) && !isNaN(parsedNorthing)) {
-    if (system === "SIRES-DMQ") {
-      if (parsedEasting < 450000 || parsedEasting > 550000) {
-        errors.push("Este fuera del rango típico de SIRES-DMQ (450000-550000)");
-      }
-      if (parsedNorthing < 9950000 || parsedNorthing > 10050000) {
+    // Este y Norte intercambiados: cada valor encaja en el rango del otro
+    const swapped =
+      eastingOut &&
+      northingOut &&
+      parsedNorthing >= eMin &&
+      parsedNorthing <= eMax &&
+      parsedEasting >= nMin &&
+      parsedEasting <= nMax;
+
+    if (swapped) {
+      errors.push("Parece que Este y Norte están intercambiados");
+    } else {
+      if (eastingOut) {
         errors.push(
-          "Norte fuera del rango típico de SIRES-DMQ (9950000-10050000)"
+          `Este fuera del rango típico de ${name} (${formatRange(range.easting)})`
+        );
+      }
+      if (northingOut) {
+        errors.push(
+          `Norte fuera del rango típico de ${name} (${formatRange(range.northing)})`
         );
       }
     }
@@ -257,25 +371,49 @@ export const validateProjectedCoordinates = (easting, northing, system) => {
   };
 };
 
-// Transformación simple entre dos sistemas (ESTRUCTURA LIMPIA)
+// Valida un punto en cualquier sistema soportado (x = lon/Este, y = lat/Norte)
+export const validateInSystem = (x, y, crs) => {
+  if (!COORDINATE_SYSTEMS[crs]) {
+    return { isValid: false, errors: [`Sistema no soportado: ${crs}`] };
+  }
+  if (isGeographicCRS(crs)) {
+    const { isValid, errors } = validateCoordinates(y, x);
+    return { isValid, errors };
+  }
+  const { isValid, errors } = validateProjectedCoordinates(x, y, crs);
+  return { isValid, errors };
+};
+
+// Transformación simple entre dos sistemas
 export const transformCoordinate = (x, y, fromCRS, toCRS) => {
   try {
     const parsedX = typeof x === "string" ? parseNumber(x) : x;
     const parsedY = typeof y === "string" ? parseNumber(y) : y;
 
-    if (isNaN(parsedX) || isNaN(parsedY)) {
+    if (
+      typeof parsedX !== "number" ||
+      typeof parsedY !== "number" ||
+      isNaN(parsedX) ||
+      isNaN(parsedY)
+    ) {
       throw new Error(
         "Coordenadas inválidas - no se pudieron convertir a números"
       );
     }
 
-    const transformResult = proj4(fromCRS, toCRS, [parsedX, parsedY]);
-    return {
-      success: true,
-      x: transformResult[0],
-      y: transformResult[1],
-      error: null,
-    };
+    if (!COORDINATE_SYSTEMS[fromCRS]) {
+      throw new Error(`Sistema de origen no soportado: ${fromCRS}`);
+    }
+    if (!COORDINATE_SYSTEMS[toCRS]) {
+      throw new Error(`Sistema de destino no soportado: ${toCRS}`);
+    }
+
+    const [tx, ty] = proj4(fromCRS, toCRS, [parsedX, parsedY]);
+    if (!Number.isFinite(tx) || !Number.isFinite(ty)) {
+      throw new Error("Resultado fuera del dominio de la proyección");
+    }
+
+    return { success: true, x: tx, y: ty, error: null };
   } catch (error) {
     return {
       success: false,
@@ -286,7 +424,43 @@ export const transformCoordinate = (x, y, fromCRS, toCRS) => {
   }
 };
 
-// Procesamiento por lotes - VERSIÓN LIMPIA Y COMPLETA
+// Devuelve {lat, lng} WGS84 de un punto en cualquier sistema soportado
+export const toWGS84 = (x, y, crs) => {
+  if (isGeographicCRS(crs)) return { lat: y, lng: x };
+  const result = transformCoordinate(x, y, crs, "EPSG:4326");
+  return result.success ? { lat: result.y, lng: result.x } : null;
+};
+
+// WGS84 de un resultado de transformación (incluye historiales antiguos
+// guardados antes de que existiera el campo `wgs84`).
+export const getResultWGS84 = (result) => {
+  if (!result) return null;
+  if (
+    result.wgs84 &&
+    Number.isFinite(result.wgs84.lat) &&
+    Number.isFinite(result.wgs84.lng)
+  ) {
+    return result.wgs84;
+  }
+  const t = result.transformation;
+  if (t?.source && Number.isFinite(t.source.x) && Number.isFinite(t.source.y)) {
+    return toWGS84(t.source.x, t.source.y, t.source.crs);
+  }
+  if (t?.target && Number.isFinite(t.target.x) && Number.isFinite(t.target.y)) {
+    return toWGS84(t.target.x, t.target.y, t.target.crs);
+  }
+  if (result.coordinates) {
+    return { lat: result.coordinates.latitude, lng: result.coordinates.longitude };
+  }
+  return null;
+};
+
+const makeId = (base, suffix = "") =>
+  `${base}${suffix}_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+
+const roundTo = (value, decimals) => Number(value.toFixed(decimals));
+
+// Procesamiento por lotes
 export const transformCoordinatesBatch = async (
   coordinates,
   settings = {},
@@ -295,11 +469,10 @@ export const transformCoordinatesBatch = async (
   const defaultSettings = {
     sourceCRS: "EPSG:4326",
     targetCRS: "UTM-17S",
-    precision: 6,
+    precision: null, // null = automático según unidades del sistema destino
     validateInput: true,
     skipInvalid: true,
     includeOriginal: true,
-    calculatePrecision: false,
     generateReport: true,
     generateAllSystems: false,
   };
@@ -318,14 +491,7 @@ export const transformCoordinatesBatch = async (
   };
 
   const total = coordinates.length;
-  const allSystems = [
-    "EPSG:4326",
-    "SIRES-DMQ",
-    "UTM-17N",
-    "UTM-17S",
-    "UTM-18N",
-    "UTM-18S",
-  ];
+  const decimalsFor = (crs) => config.precision ?? getDecimalsForCRS(crs);
 
   for (let i = 0; i < total; i++) {
     const coord = coordinates[i];
@@ -349,106 +515,73 @@ export const transformCoordinatesBatch = async (
         throw new Error("Coordenadas contienen valores no numéricos");
       }
 
-      if (config.generateAllSystems || coord.targetSystem === "all") {
-        const baseResult = {
-          id: `${coord.id || i + 1}_${Date.now()}_${Math.random()
-            .toString(36)
-            .substr(2, 9)}`,
-          name: coord.name || `Punto ${i + 1}`,
-          status: "success",
-          transformations: {},
-        };
-
-        let hasAnySuccess = false;
-
-        for (const targetSystem of allSystems) {
-          if (targetSystem === sourceCRS) {
-            baseResult.transformations[targetSystem] = {
-              source: { x: sourceX, y: sourceY, crs: sourceCRS },
-              target: { x: sourceX, y: sourceY, crs: targetSystem },
-              isOriginal: true,
-            };
-            hasAnySuccess = true;
-            continue;
-          }
-
-          const transformation = transformCoordinate(
-            sourceX,
-            sourceY,
-            sourceCRS,
-            targetSystem
-          );
-
-          if (transformation.success) {
-            baseResult.transformations[targetSystem] = {
-              source: { x: sourceX, y: sourceY, crs: sourceCRS },
-              target: {
-                x: parseFloat(transformation.x.toFixed(config.precision)),
-                y: parseFloat(transformation.y.toFixed(config.precision)),
-                crs: targetSystem,
-              },
-            };
-
-            if (targetSystem === "EPSG:4326") {
-              baseResult.transformations[targetSystem].dms = {
-                lat: decimalToDMS(transformation.y, "lat"),
-                lng: decimalToDMS(transformation.x, "lng"),
-              };
-            }
-            hasAnySuccess = true;
-          }
+      if (config.validateInput) {
+        const validation = validateInSystem(sourceX, sourceY, sourceCRS);
+        if (!validation.isValid) {
+          throw new Error(validation.errors.join("; "));
         }
+      }
 
-        if (hasAnySuccess) {
-          const firstSuccessful = Object.values(baseResult.transformations)[0];
-          baseResult.transformation = firstSuccessful;
-          results.push(baseResult);
-          report.successful++;
-        } else {
-          throw new Error("No se pudo transformar a ningún sistema");
-        }
-      } else {
+      const source = { x: sourceX, y: sourceY, crs: sourceCRS };
+      const wgs84 = toWGS84(sourceX, sourceY, sourceCRS);
+      const targets =
+        config.generateAllSystems || coord.targetSystem === "all"
+          ? SUPPORTED_SYSTEMS
+          : [coord.targetSystem && coord.targetSystem !== "all"
+              ? coord.targetSystem
+              : config.targetCRS];
+
+      const transformations = {};
+      for (const targetSystem of targets) {
         const transformation = transformCoordinate(
           sourceX,
           sourceY,
           sourceCRS,
-          config.targetCRS
+          targetSystem
         );
-
         if (!transformation.success) {
-          throw new Error(transformation.error);
+          if (targets.length === 1) throw new Error(transformation.error);
+          continue;
         }
 
-        const result = {
-          id: `${coord.id || i + 1}_${Date.now()}_${Math.random()
-            .toString(36)
-            .substr(2, 9)}`,
-          name: coord.name || `Punto ${i + 1}`,
-          status: "success",
-          transformation: {
-            source: { x: sourceX, y: sourceY, crs: sourceCRS },
-            target: {
-              x: parseFloat(transformation.x.toFixed(config.precision)),
-              y: parseFloat(transformation.y.toFixed(config.precision)),
-              crs: config.targetCRS,
-            },
+        const decimals = decimalsFor(targetSystem);
+        transformations[targetSystem] = {
+          source,
+          target: {
+            x: roundTo(transformation.x, decimals),
+            y: roundTo(transformation.y, decimals),
+            crs: targetSystem,
           },
+          ...(targetSystem === sourceCRS ? { isOriginal: true } : {}),
+          ...(isGeographicCRS(targetSystem)
+            ? {
+                dms: {
+                  lat: decimalToDMS(transformation.y, "lat"),
+                  lng: decimalToDMS(transformation.x, "lng"),
+                },
+              }
+            : {}),
         };
-
-        if (config.includeOriginal) {
-          result.original = coord;
-        }
-
-        if (config.targetCRS === "EPSG:4326") {
-          result.transformation.dms = {
-            lat: decimalToDMS(transformation.y, "lat"),
-            lng: decimalToDMS(transformation.x, "lng"),
-          };
-        }
-
-        results.push(result);
-        report.successful++;
       }
+
+      const transformed = Object.values(transformations);
+      if (transformed.length === 0) {
+        throw new Error("No se pudo transformar a ningún sistema");
+      }
+
+      const result = {
+        id: makeId(coord.id || i + 1),
+        name: coord.name || `Punto ${i + 1}`,
+        status: "success",
+        transformation: transformed[0],
+        wgs84,
+      };
+      if (targets.length > 1) result.transformations = transformations;
+      if (coord.description) result.description = coord.description;
+      if (config.includeOriginal) result.original = coord;
+
+      results.push(result);
+      report.successful++;
     } catch (error) {
       report.failed++;
       report.errors.push({
@@ -462,9 +595,7 @@ export const transformCoordinatesBatch = async (
       }
 
       results.push({
-        id: `${coord.id || i + 1}_error_${Date.now()}_${Math.random()
-          .toString(36)
-          .substr(2, 9)}`,
+        id: makeId(coord.id || i + 1, "_error"),
         name: coord.name || `Punto ${i + 1}`,
         status: "error",
         error: error.message,
@@ -480,8 +611,9 @@ export const transformCoordinatesBatch = async (
       );
     }
 
-    if (i % 100 === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 1));
+    // Ceder el hilo principal para no congelar la interfaz
+    if (i > 0 && i % 500 === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
   }
 
@@ -526,303 +658,11 @@ export const formatCoordinate = (value, type = "decimal", precision = 6) => {
   }
 };
 
-// ==================== FUNCIONES DE EXPORTACIÓN ====================
-
-// Función principal de exportación
-export const exportData = (results, format = "csv") => {
-  if (!results || results.length === 0) {
-    alert("No hay datos para exportar");
-    return;
-  }
-
-  try {
-    switch (format.toLowerCase()) {
-      case "csv":
-        exportToCSV(results);
-        break;
-      case "excel":
-        exportToExcel(results);
-        break;
-      case "geojson":
-        exportToGeoJSON(results);
-        break;
-      case "kml":
-        exportToKML(results);
-        break;
-      default:
-        console.error("Formato no soportado:", format);
-        alert("Formato de exportación no soportado");
-    }
-  } catch (error) {
-    console.error("Error en exportación:", error);
-    alert(`Error al exportar: ${error.message}`);
-  }
-};
-
-// Exportar a CSV
-const exportToCSV = (results) => {
-  const headers = [
-    "ID",
-    "Nombre",
-    "Descripción",
-    "Lat_Original",
-    "Lng_Original",
-    "Sistema_Original",
-    "X_Transformado",
-    "Y_Transformado",
-    "Sistema_Destino",
-    "Precisión",
-    "Calidad_Precisión",
-    "Estado",
-  ];
-
-  const rows = results.map((result) => [
-    result.id || "",
-    result.name || "",
-    result.description || "",
-    result.transformation?.source?.y?.toFixed(6) || "",
-    result.transformation?.source?.x?.toFixed(6) || "",
-    result.transformation?.source?.crs || "",
-    result.transformation?.target?.x?.toFixed(2) || "",
-    result.transformation?.target?.y?.toFixed(2) || "",
-    result.transformation?.target?.crs || "",
-    result.precision?.value?.toFixed(3) || "",
-    result.precision?.quality || "",
-    result.status || "",
-  ]);
-
-  const csvContent = [headers, ...rows]
-    .map((row) => row.map((field) => `"${field}"`).join(","))
-    .join("\n");
-
-  downloadFile(csvContent, "coordenadas_transformadas.csv", "text/csv");
-};
-
-// Exportar a Excel usando XLSX library
-const exportToExcel = (results) => {
-  // Preparar datos para XLSX
-  const worksheetData = results.map((result) => ({
-    ID: result.id || "",
-    Nombre: result.name || "",
-    Descripción: result.description || "",
-    "Latitud Original": result.transformation?.source?.y?.toFixed(6) || "",
-    "Longitud Original": result.transformation?.source?.x?.toFixed(6) || "",
-    "Sistema Original": result.transformation?.source?.crs || "",
-    "X Transformado (m)": result.transformation?.target?.x?.toFixed(2) || "",
-    "Y Transformado (m)": result.transformation?.target?.y?.toFixed(2) || "",
-    "Sistema Destino": result.transformation?.target?.crs || "",
-    Precisión: result.precision?.value?.toFixed(3) || "",
-    "Calidad Precisión": result.precision?.quality || "",
-    Estado: result.status || "",
-    "Fecha Procesamiento": new Date().toLocaleString("es-EC"),
-  }));
-
-  // Crear workbook y worksheet
-  if (!window.XLSX) {
-    throw new Error(
-      "Librería XLSX no está disponible. Asegúrate de importar XLSX en App.jsx"
-    );
-  }
-  const XLSX = window.XLSX;
-  const workbook = XLSX.utils.book_new();
-  const worksheet = XLSX.utils.json_to_sheet(worksheetData);
-
-  // Ajustar ancho de columnas
-  const columnWidths = [
-    { wch: 10 }, // ID
-    { wch: 20 }, // Nombre
-    { wch: 30 }, // Descripción
-    { wch: 15 }, // Latitud Original
-    { wch: 15 }, // Longitud Original
-    { wch: 15 }, // Sistema Original
-    { wch: 18 }, // X Transformado
-    { wch: 18 }, // Y Transformado
-    { wch: 15 }, // Sistema Destino
-    { wch: 12 }, // Precisión
-    { wch: 18 }, // Calidad Precisión
-    { wch: 10 }, // Estado
-    { wch: 20 }, // Fecha Procesamiento
-  ];
-  worksheet["!cols"] = columnWidths;
-
-  // Agregar worksheet al workbook
-  XLSX.utils.book_append_sheet(
-    workbook,
-    worksheet,
-    "Coordenadas Transformadas"
-  );
-
-  // Exportar
-  XLSX.writeFile(workbook, "coordenadas_transformadas.xlsx");
-};
-
-// Exportar a GeoJSON
-const exportToGeoJSON = (results) => {
-  const features = results
-    .filter(
-      (result) => result.transformation?.target && result.status === "success"
-    )
-    .map((result) => {
-      // Usar DIRECTAMENTE las coordenadas transformadas (sistema destino)
-      const longitude = result.transformation.target.x;
-      const latitude = result.transformation.target.y;
-
-      return {
-        type: "Feature",
-        geometry: {
-          type: "Point",
-          coordinates: [longitude, latitude],
-        },
-        properties: {
-          id: result.id,
-          name: result.name || `Punto ${result.id}`,
-          description: result.description || "",
-          original_system: result.transformation.source?.crs || "",
-          original_x: result.transformation.source?.x || null,
-          original_y: result.transformation.source?.y || null,
-          transformed_system: result.transformation.target?.crs || "",
-          transformed_x: result.transformation.target?.x || null,
-          transformed_y: result.transformation.target?.y || null,
-          precision: result.precision?.value || null,
-          precision_quality: result.precision?.quality || "",
-          status: result.status || "",
-          processed_date: new Date().toISOString(),
-        },
-      };
-    });
-
-  const geoJSON = {
-    type: "FeatureCollection",
-    crs: {
-      type: "name",
-      properties: {
-        // Usar el sistema de coordenadas transformado, no WGS84
-        name: results[0]?.transformation?.target?.crs || "SIRES-DMQ",
-      },
-    },
-    features: features,
-    metadata: {
-      title: "Coordenadas Transformadas UIO",
-      description: `Coordenadas en sistema ${
-        results[0]?.transformation?.target?.crs || "transformado"
-      }`,
-      generated: new Date().toISOString(),
-      total_points: features.length,
-      coordinate_system: results[0]?.transformation?.target?.crs || "SIRES-DMQ",
-      warning: "Las coordenadas están en el sistema transformado, no en WGS84",
-    },
-  };
-
-  const geoJSONContent = JSON.stringify(geoJSON, null, 2);
-  downloadFile(
-    geoJSONContent,
-    "coordenadas_transformadas.geojson",
-    "application/geo+json"
-  );
-};
-
-// Exportar a KML (compatible con Google Earth)
-const exportToKML = (results) => {
-  const validResults = results.filter(
-    (result) => result.transformation?.source && result.status === "success"
-  );
-
-  if (validResults.length === 0) {
-    alert("No hay coordenadas válidas para exportar a KML");
-    return;
-  }
-
-  // KML requiere coordenadas en WGS84 (lat/lng)
-  const placemarks = validResults.map((result) => {
-    // Usar coordenadas originales si ya están en WGS84, sino transformar
-    const lat = result.transformation.source.y;
-    const lng = result.transformation.source.x;
-
-    const name = result.name || `Punto ${result.id}`;
-    const description = `
-      <![CDATA[
-        <h3>${name}</h3>
-        <table border="1" cellpadding="5">
-          <tr><th colspan="2">Coordenadas Originales</th></tr>
-          <tr><td>Latitud</td><td>${lat.toFixed(6)}°</td></tr>
-          <tr><td>Longitud</td><td>${lng.toFixed(6)}°</td></tr>
-          <tr><td>Sistema</td><td>${result.transformation.source.crs}</td></tr>
-          ${result.transformation.target ? `
-          <tr><th colspan="2">Coordenadas Transformadas</th></tr>
-          <tr><td>Sistema</td><td>${result.transformation.target.crs}</td></tr>
-          <tr><td>Este (X)</td><td>${result.transformation.target.x.toFixed(2)} m</td></tr>
-          <tr><td>Norte (Y)</td><td>${result.transformation.target.y.toFixed(2)} m</td></tr>
-          ` : ''}
-          ${result.precision ? `
-          <tr><th colspan="2">Precisión</th></tr>
-          <tr><td>Calidad</td><td>${result.precision.quality}</td></tr>
-          ` : ''}
-        </table>
-      ]]>
-    `;
-
-    return `
-    <Placemark>
-      <name>${escapeXML(name)}</name>
-      <description>${description}</description>
-      <Point>
-        <coordinates>${lng},${lat},0</coordinates>
-      </Point>
-      <Style>
-        <IconStyle>
-          <color>ff0000ff</color>
-          <scale>1.0</scale>
-        </IconStyle>
-      </Style>
-    </Placemark>`;
-  }).join('\n');
-
-  const kmlContent = `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-  <Document>
-    <name>Coordenadas Transformadas UIO</name>
-    <description>Exportado desde Transformador de Coordenadas Quito - ${new Date().toLocaleString('es-EC')}</description>
-    <Style id="defaultStyle">
-      <IconStyle>
-        <color>ff0000ff</color>
-        <scale>1.0</scale>
-        <Icon>
-          <href>http://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href>
-        </Icon>
-      </IconStyle>
-      <LabelStyle>
-        <scale>0.8</scale>
-      </LabelStyle>
-    </Style>
-    ${placemarks}
-  </Document>
-</kml>`;
-
-  downloadFile(kmlContent, "coordenadas_transformadas.kml", "application/vnd.google-earth.kml+xml");
-};
-
-// Función auxiliar para escapar caracteres XML
-const escapeXML = (str) => {
-  if (!str) return '';
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-};
-
-// Función auxiliar para descargar archivos
-const downloadFile = (content, fileName, mimeType) => {
-  const blob = new Blob([content], { type: mimeType });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
+// Valor con unidades según el sistema: "-0.22010000°" o "498630.153 m"
+export const formatWithUnits = (value, crs) => {
+  const formatted = formatForCRS(value, crs);
+  if (!formatted) return "-";
+  return isGeographicCRS(crs) ? `${formatted}°` : `${formatted} m`;
 };
 
 // Función para obtener estadísticas de transformación
@@ -830,25 +670,12 @@ export const getTransformationStats = (results) => {
   const total = results.length;
   const successful = results.filter((r) => r.status === "success").length;
   const failed = results.filter((r) => r.status === "error").length;
-  const excellent = results.filter(
-    (r) => r.precision?.quality === "Excelente"
-  ).length;
-  const veryGood = results.filter(
-    (r) => r.precision?.quality === "Muy buena"
-  ).length;
-  const good = results.filter((r) => r.precision?.quality === "Buena").length;
 
   return {
     total,
     successful,
     failed,
     successRate: total > 0 ? ((successful / total) * 100).toFixed(1) : 0,
-    precision: {
-      excellent,
-      veryGood,
-      good,
-      excellentRate: total > 0 ? ((excellent / total) * 100).toFixed(1) : 0,
-    },
   };
 };
 
@@ -856,7 +683,7 @@ export const getTransformationStats = (results) => {
 
 // Calcular distancia entre dos puntos en coordenadas geográficas (Haversine)
 export const calculateDistance = (lat1, lng1, lat2, lng2) => {
-  const R = 6371000; // Radio de la Tierra en metros
+  const R = 6371000; // Radio medio de la Tierra en metros
   const toRad = (deg) => (deg * Math.PI) / 180;
 
   const dLat = toRad(lat2 - lat1);
@@ -875,33 +702,34 @@ export const calculateDistance = (lat1, lng1, lat2, lng2) => {
   return {
     meters: distance,
     kilometers: distance / 1000,
-    formatted: distance > 1000
-      ? `${(distance / 1000).toFixed(2)} km`
-      : `${distance.toFixed(2)} m`,
+    formatted:
+      distance > 1000
+        ? `${(distance / 1000).toFixed(2)} km`
+        : `${distance.toFixed(2)} m`,
   };
 };
 
 // Copiar texto al portapapeles
 export const copyToClipboard = (text) => {
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    return navigator.clipboard.writeText(text)
+    return navigator.clipboard
+      .writeText(text)
       .then(() => true)
       .catch(() => false);
-  } else {
-    // Fallback para navegadores antiguos
-    try {
-      const textArea = document.createElement("textarea");
-      textArea.value = text;
-      textArea.style.position = "fixed";
-      textArea.style.left = "-999999px";
-      document.body.appendChild(textArea);
-      textArea.select();
-      const result = document.execCommand("copy");
-      document.body.removeChild(textArea);
-      return Promise.resolve(result);
-    } catch {
-      return Promise.resolve(false);
-    }
+  }
+  // Fallback para navegadores antiguos
+  try {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.select();
+    const result = document.execCommand("copy");
+    document.body.removeChild(textArea);
+    return Promise.resolve(result);
+  } catch {
+    return Promise.resolve(false);
   }
 };
 
@@ -909,15 +737,16 @@ export const copyToClipboard = (text) => {
 export const formatCoordinatesForCopy = (result) => {
   if (!result.transformation) return "";
 
-  const source = result.transformation.source;
-  const target = result.transformation.target;
+  const { source, target } = result.transformation;
+  const describe = ({ x, y, crs }) =>
+    isGeographicCRS(crs)
+      ? `  Latitud: ${formatWithUnits(y, crs)}\n  Longitud: ${formatWithUnits(x, crs)}`
+      : `  Este (X): ${formatWithUnits(x, crs)}\n  Norte (Y): ${formatWithUnits(y, crs)}`;
 
   return `${result.name || "Punto"}
 Coordenadas Originales (${source.crs}):
-  Latitud: ${source.y.toFixed(6)}°
-  Longitud: ${source.x.toFixed(6)}°
+${describe(source)}
 
 Coordenadas Transformadas (${target.crs}):
-  Este (X): ${target.x.toFixed(2)} m
-  Norte (Y): ${target.y.toFixed(2)} m`;
+${describe(target)}`;
 };

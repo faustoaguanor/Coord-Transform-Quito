@@ -1,200 +1,55 @@
 import { useState } from "react";
 import * as XLSX from "xlsx";
+import {
+  MAX_FILE_SIZE,
+  MAX_ROWS,
+  parseCSV,
+  rowsToCoordinates,
+} from "../utils/fileParsing";
 
 const FileUpload = ({ onFileUpload }) => {
   const [dragActive, setDragActive] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [filePreview, setFilePreview] = useState(null);
+  const [fileError, setFileError] = useState(null);
   const [transformSettings, setTransformSettings] = useState({
     sourceSystem: "auto", // auto-detectar
     targetSystem: "SIRES-DMQ", // transformar a todos los sistemas
   });
 
-  // Función para normalizar números (manejo de puntos y comas)
-  const parseNumber = (value) => {
-    if (typeof value === "number") return value;
-    if (typeof value !== "string") return NaN;
-
-    // Remover espacios
-    let cleaned = value.toString().trim();
-
-    // Si contiene tanto punto como coma, asumir que coma es separador de miles
-    if (cleaned.includes(".") && cleaned.includes(",")) {
-      // Formato: 1,234.56 (inglés)
-      if (cleaned.lastIndexOf(".") > cleaned.lastIndexOf(",")) {
-        cleaned = cleaned.replace(/,/g, "");
-      }
-      // Formato: 1.234,56 (europeo)
-      else {
-        cleaned = cleaned.replace(/\./g, "").replace(",", ".");
-      }
-    }
-    // Solo coma (puede ser decimal europeo)
-    else if (cleaned.includes(",") && !cleaned.includes(".")) {
-      // Si hay más de una coma, es separador de miles
-      const commaCount = (cleaned.match(/,/g) || []).length;
-      if (commaCount === 1) {
-        // Verificar si es decimal (números después de coma son <= 6 dígitos)
-        const afterComma = cleaned.split(",")[1];
-        if (afterComma && afterComma.length <= 6) {
-          cleaned = cleaned.replace(",", ".");
-        } else {
-          cleaned = cleaned.replace(/,/g, "");
-        }
-      } else {
-        cleaned = cleaned.replace(/,/g, "");
-      }
-    }
-
-    return parseFloat(cleaned);
-  };
-
-  // Función para detectar formato de coordenadas con nombres flexibles
-  const detectCoordinateFormat = (headers) => {
-    const headerMap = {};
-
-    headers.forEach((header, index) => {
-      const cleanHeader = header
-        .toString()
-        .replace(/^\uFEFF/, "")
-        .toLowerCase()
-        .trim();
-
-      // Detectar latitud geográfica
-      if (cleanHeader.match(/^(lat|latitude|latitud)$/)) {
-        headerMap.lat = index;
-      }
-      // Detectar longitud geográfica
-      else if (
-        cleanHeader.match(/^(lon|lng|long|longitude|longitud)$/)
-      ) {
-        headerMap.lng = index;
-      }
-      // Detectar coordenadas UTM X
-      else if (
-        cleanHeader.match(/^(x|este|easting|utm_x|coord_x|coordenada_x)$/)
-      ) {
-        headerMap.x = index;
-      }
-      // Detectar coordenadas UTM Y
-      else if (
-        cleanHeader.match(/^(y|norte|northing|utm_y|coord_y|coordenada_y)$/)
-      ) {
-        headerMap.y = index;
-      }
-      // Detectar zona UTM
-      else if (
-        cleanHeader.match(/^(zone|zona|utm_zone|hemisphere|hemisferio)$/)
-      ) {
-        headerMap.zone = index;
-      }
-      // Detectar nombre del punto
-      else if (cleanHeader.match(/^(name|nombre|punto|id|identificador)$/)) {
-        headerMap.name = index;
-      }
-    });
-
-    return headerMap;
-  };
-
-  const detectDelimiter = (line) => {
-    const candidates = [",", ";", "\t"];
-    const counts = candidates.map((delimiter) => {
-      let count = 0;
-      let inQuotes = false;
-      for (let i = 0; i < line.length; i++) {
-        if (line[i] === '"') {
-          inQuotes = !inQuotes;
-        } else if (line[i] === delimiter && !inQuotes) {
-          count++;
-        }
-      }
-      return { delimiter, count };
-    });
-
-    const best = counts.sort((a, b) => b.count - a.count)[0];
-    return best?.count > 0 ? best.delimiter : ",";
-  };
-
-  const detectProjectedSystem = (x, y) => {
-    if (x > 450000 && x < 550000 && y > 9950000 && y < 10050000) {
-      return "SIRES-DMQ";
-    }
-
-    if (x > 200000 && x < 800000) {
-      if (y > 9000000) return "UTM-17S";
-      if (y < 1000000) return "UTM-17N";
-      if (y > 800000) return "UTM-18S";
-      return "UTM-18N";
-    }
-
-    return "UTM-17S";
-  };
-
-  // Función mejorada para parsear CSV
-  const parseCSV = (text) => {
-    const lines = text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line);
-
-    if (lines.length === 0) return [];
-
-    const delimiter = detectDelimiter(lines[0]);
-    const result = [];
-
-    for (const line of lines) {
-      const row = [];
-      let current = "";
-      let inQuotes = false;
-
-      for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-
-        if (char === '"') {
-          inQuotes = !inQuotes;
-        } else if (char === delimiter && !inQuotes) {
-          row.push(current.trim());
-          current = "";
-        } else {
-          current += char;
-        }
-      }
-
-      row.push(current.trim());
-      result.push(row);
-    }
-
-    return result;
-  };
-
   // Función principal para manejar archivos
   const handleFile = async (file) => {
     if (!file) return;
 
-    // Limitar tamaño a 5 MB
-    const MAX_SIZE = 5 * 1024 * 1024;
-    if (file.size > MAX_SIZE) {
-      alert("❌ Archivo demasiado grande. Máximo permitido: 5 MB.");
+    setFileError(null);
+    setFilePreview(null);
+
+    if (file.size > MAX_FILE_SIZE) {
+      setFileError(
+        `Archivo demasiado grande (${(file.size / 1048576).toFixed(1)} MB). Máximo permitido: ${MAX_FILE_SIZE / 1048576} MB.`
+      );
       return;
     }
 
     setIsProcessing(true);
-    setFilePreview(null);
 
     try {
+      const fileName = file.name.toLowerCase();
       let data;
 
-      if (file.name.endsWith(".csv")) {
-        const text = await file.text();
-        data = parseCSV(text);
-      } else if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls")) {
+      if (fileName.endsWith(".csv") || fileName.endsWith(".txt")) {
+        data = parseCSV(await file.text());
+      } else if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
         const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: "buffer" });
+        const workbook = XLSX.read(buffer, { type: "array" });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
-        // ⚡ Hacer copia profunda para aislar datos
-        data = JSON.parse(JSON.stringify(data));
+        // raw: true conserva todos los decimales; con raw: false se usaría el
+        // formato de celda de Excel, que puede redondear las coordenadas.
+        data = XLSX.utils.sheet_to_json(worksheet, {
+          header: 1,
+          raw: true,
+          defval: "",
+        });
       } else {
         throw new Error("Formato de archivo no soportado. Use CSV o Excel.");
       }
@@ -205,171 +60,45 @@ const FileUpload = ({ onFileUpload }) => {
         );
       }
 
-      const headers = data[0];
-      const rows = data
-        .slice(1)
-        .filter((row) =>
-          row.some((cell) => cell !== "" && cell !== null && cell !== undefined)
+      const headers = data[0].map((h) => String(h ?? "").trim());
+      const rows = data.slice(1);
+
+      if (rows.length > MAX_ROWS) {
+        throw new Error(
+          `El archivo tiene ${rows.length.toLocaleString("es-EC")} filas; el máximo es ${MAX_ROWS.toLocaleString("es-EC")}. Divídalo en partes.`
         );
-
-      console.log("📋 Columnas detectadas:", headers);
-
-      // Detectar formato de coordenadas
-      const coordMap = detectCoordinateFormat(headers);
-      console.log("🗺️ Mapeo de coordenadas:", coordMap);
-
-      // Mostrar vista previa de los primeros registros
-      const preview = {
-        headers: headers,
-        sampleRows: rows.slice(0, 3),
-        coordMap: coordMap,
-        totalRows: rows.length,
-      };
-      setFilePreview(preview);
-
-      // Validar que tenemos las columnas necesarias
-      if (
-        coordMap.lat === undefined &&
-        coordMap.lng === undefined &&
-        coordMap.x === undefined &&
-        coordMap.y === undefined
-      ) {
-        throw new Error(`❌ No se detectaron columnas de coordenadas válidas.
-
-📝 Use nombres como:
-• Geográficas: lat, latitude, latitud, lon, lng, longitude, longitud
-• Proyectadas: x, este/easting, y, norte/northing
-• UTM: utm_x, utm_y, easting, northing
-
-🔍 Columnas encontradas: ${headers.join(", ")}`);
       }
 
-      // Procesar coordenadas
-      const coordinates = [];
-
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-
-        if (!row || row.length === 0) continue;
-
-        let lat, lng;
-        let hasValidCoords = false;
-
-        // Nombre del punto
-        const pointName =
-          coordMap.name !== undefined
-            ? row[coordMap.name] || `Punto ${i + 1}`
-            : `Punto ${i + 1}`;
-
-        const resolveProjectedSystem = (x, y) => {
-          const detectedProjectedSystem = detectProjectedSystem(x, y);
-          const coordinatesLookGeographic =
-            x >= -180 && x <= 180 && y >= -90 && y <= 90;
-          const forceProjectedFromXY =
-            transformSettings.sourceSystem === "EPSG:4326" &&
-            !coordinatesLookGeographic;
-
-          const system =
-            transformSettings.sourceSystem === "auto" || forceProjectedFromXY
-              ? detectedProjectedSystem
-              : transformSettings.sourceSystem;
-
-          if (forceProjectedFromXY) {
-            console.warn(
-              `⚠️ Fila ${i + 1}: columnas X/Y con valores proyectados detectadas; se ignora EPSG:4326 y se usa ${system}.`
-            );
-          }
-
-          return system;
-        };
-
-        // Determinar si son coordenadas geográficas o proyectadas
-        if (coordMap.lat !== undefined && coordMap.lng !== undefined) {
-          lat = parseNumber(row[coordMap.lat]);
-          lng = parseNumber(row[coordMap.lng]);
-
-          if (!isNaN(lat) && !isNaN(lng)) {
-            hasValidCoords = true;
-            const looksGeographic =
-              lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
-
-            if (looksGeographic) {
-              coordinates.push({
-                id: i + 1,
-                name: pointName,
-                coordinates: {
-                  latitude: lat,
-                  longitude: lng,
-                },
-                targetSystem: transformSettings.targetSystem, // Agregar sistema destino
-              });
-            } else {
-              const x = lng;
-              const y = lat;
-              const looksProjected =
-                x >= 150000 && x <= 900000 && y >= 0 && y <= 12000000;
-
-              if (looksProjected) {
-                const system = resolveProjectedSystem(x, y);
-                console.warn(
-                  `⚠️ Fila ${i + 1}: columnas lat/lng fuera de rango geográfico, se interpretan como X/Y (${system}).`
-                );
-                coordinates.push({
-                  id: i + 1,
-                  name: pointName,
-                  easting: x,
-                  northing: y,
-                  system,
-                  targetSystem: transformSettings.targetSystem,
-                });
-              } else {
-                hasValidCoords = false;
-                console.warn(
-                  `⚠️ Fila ${i + 1}: lat/lng fuera de rango y no parecen coordenadas proyectadas válidas`
-                );
-              }
-            }
-          }
-        } else if (coordMap.x !== undefined && coordMap.y !== undefined) {
-          const x = parseNumber(row[coordMap.x]);
-          const y = parseNumber(row[coordMap.y]);
-
-          if (!isNaN(x) && !isNaN(y)) {
-            hasValidCoords = true;
-            const system = resolveProjectedSystem(x, y);
-
-            coordinates.push({
-              id: i + 1,
-              name: pointName,
-              easting: x,
-              northing: y,
-              system: system,
-              targetSystem: transformSettings.targetSystem, // Agregar sistema destino
-            });
-          }
-        }
-
-        if (!hasValidCoords) {
-          console.warn(`⚠️ Fila ${i + 1}: Coordenadas inválidas o faltantes`);
-        }
-      }
-
-      if (coordinates.length === 0) {
-        throw new Error("No se encontraron coordenadas válidas en el archivo.");
-      }
-
-      console.log(
-        `✅ Procesadas ${coordinates.length} coordenadas de ${rows.length} filas`
+      const { coordinates, rejected, warnings, coordMap } = rowsToCoordinates(
+        headers,
+        rows,
+        transformSettings
       );
 
-      // Enviar coordenadas al componente padre
+      setFilePreview({
+        fileName: file.name,
+        headers,
+        sampleRows: rows.slice(0, 3),
+        coordMap,
+        totalRows: rows.length,
+        accepted: coordinates.length,
+        rejected,
+        warnings,
+      });
+
+      if (coordinates.length === 0) {
+        throw new Error(
+          "No se encontraron coordenadas válidas en el archivo. Revise el detalle de filas rechazadas."
+        );
+      }
+
       onFileUpload(coordinates);
     } catch (error) {
-      console.error("❌ Error procesando archivo:", error);
-      alert(`Error al procesar archivo:\n\n${error.message}`);
+      console.error("Error procesando archivo:", error);
+      setFileError(error.message);
+    } finally {
+      setIsProcessing(false);
     }
-
-    setIsProcessing(false);
   };
 
   // Event handlers para drag & drop
@@ -398,6 +127,8 @@ const FileUpload = ({ onFileUpload }) => {
     if (e.target.files && e.target.files[0]) {
       handleFile(e.target.files[0]);
     }
+    // Permite volver a cargar el mismo archivo tras corregirlo
+    e.target.value = "";
   };
 
   return (
@@ -456,10 +187,11 @@ const FileUpload = ({ onFileUpload }) => {
           </div>
         </div>
         <div className="mt-2 text-xs text-green-700">
-          💡 <strong>Sistema origen:</strong> Déjalo en "Auto-detectar" para
-          mejor compatibilidad.
-          <strong>Sistema destino:</strong> "Todos los sistemas" genera todas
-          las transformaciones posibles.
+          💡 <strong>Sistema origen:</strong> "Auto-detectar" reconoce
+          geográficas, SIRES-DMQ y UTM zona 17. Para datos en{" "}
+          <strong>UTM zona 18</strong> (Amazonía) seleccione el sistema de
+          origen explícitamente: las zonas 17 y 18 no se distinguen por sus
+          valores.
         </div>
       </div>
       {/* Área de carga de archivos */}
@@ -476,7 +208,7 @@ const FileUpload = ({ onFileUpload }) => {
       >
         <input
           type="file"
-          accept=".csv,.xlsx,.xls"
+          accept=".csv,.txt,.xlsx,.xls"
           onChange={handleChange}
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           id="file-upload"
@@ -498,7 +230,9 @@ const FileUpload = ({ onFileUpload }) => {
                 Arrastra archivos aquí o haz clic para seleccionar
               </div>
               <div className="text-gray-500">
-                Soporta CSV, Excel (.xlsx, .xls)
+                Soporta CSV (separador coma, punto y coma o tabulación) y
+                Excel (.xlsx, .xls) · máx. {MAX_FILE_SIZE / 1048576} MB /{" "}
+                {MAX_ROWS.toLocaleString("es-EC")} filas
               </div>
 
               {/* Botón mejorado que ahora SÍ funciona */}
@@ -561,6 +295,57 @@ const FileUpload = ({ onFileUpload }) => {
           o 1.234,56
         </div>
       </div>
+
+      {/* Error de lectura del archivo */}
+      {fileError && (
+        <div
+          role="alert"
+          className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-800 whitespace-pre-line"
+        >
+          <strong>❌ No se pudo procesar el archivo.</strong>
+          {"\n"}
+          {fileError}
+        </div>
+      )}
+
+      {/* Reporte de validación por fila */}
+      {filePreview && (
+        <div className="bg-white border border-gray-200 rounded-lg p-4 text-sm">
+          <h4 className="font-medium text-gray-900 mb-2">
+            ✅ Validación de {filePreview.fileName}
+          </h4>
+          <p className="text-gray-700">
+            {filePreview.accepted} de {filePreview.totalRows} filas aceptadas
+            {filePreview.rejected.length > 0 &&
+              ` · ${filePreview.rejected.length} rechazadas`}
+            {filePreview.warnings.length > 0 &&
+              ` · ${filePreview.warnings.length} advertencias`}
+          </p>
+          {[
+            ["Filas rechazadas", filePreview.rejected, "text-red-700"],
+            ["Advertencias", filePreview.warnings, "text-amber-700"],
+          ].map(
+            ([title, items, color]) =>
+              items.length > 0 && (
+                <details key={title} className="mt-2" open={title === "Filas rechazadas"}>
+                  <summary className={`cursor-pointer font-medium ${color}`}>
+                    {title} ({items.length})
+                  </summary>
+                  <ul className="mt-1 max-h-48 overflow-y-auto list-disc list-inside text-gray-700">
+                    {items.slice(0, 200).map((item, i) => (
+                      <li key={i}>
+                        Fila {item.row}: {item.message}
+                      </li>
+                    ))}
+                    {items.length > 200 && (
+                      <li>… y {items.length - 200} más</li>
+                    )}
+                  </ul>
+                </details>
+              )
+          )}
+        </div>
+      )}
 
       {/* Vista previa del archivo */}
       {filePreview && (

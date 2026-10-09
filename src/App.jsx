@@ -1,17 +1,15 @@
 // src/App.jsx
 import { useState, useMemo, useEffect } from "react";
-import * as XLSX from "xlsx";
 import CoordinateInput from "./components/CoordinateInput";
 import FileUpload from "./components/FileUpload";
 import MapComponent from "./components/MapComponent";
 import {
-  exportData,
   transformCoordinatesBatch,
   copyToClipboard,
   formatCoordinatesForCopy,
+  formatWithUnits,
 } from "./utils/coordinateTransformations";
-
-window.XLSX = XLSX;
+import { exportData } from "./utils/exporters";
 
 // Constantes para LocalStorage
 const STORAGE_KEY = "coord_transform_history";
@@ -75,13 +73,12 @@ function App() {
       const settings = {
         sourceCRS: firstCoord?.system || "EPSG:4326", // Usar sistema detectado
         targetCRS: firstCoord?.targetSystem || "SIRES-DMQ", // Sistema específico elegido
-        precision: 6,
         validateInput: true,
-        skipInvalid: false,
+        // Una fila inválida no debe abortar todo el lote: queda como "error"
+        skipInvalid: true,
         includeOriginal: true,
-        calculatePrecision: true,
         generateReport: true,
-        generateAllSystems: false, // SIEMPRE false ahora
+        generateAllSystems: false,
       };
 
       console.log("🔄 Procesando archivo con configuración:", settings);
@@ -100,9 +97,12 @@ function App() {
 
       if (result.success) {
         setResults((prev) => [...prev, ...result.results]);
+        const { successful, failed } = result.summary;
         setProcessingStatus({
           progress: 100,
-          message: `Archivo transformado exitosamente! ${result.results.length} puntos procesados.`,
+          message: `Archivo transformado: ${successful} puntos correctos${
+            failed > 0 ? `, ${failed} con error (ver Resultados)` : ""
+          }.`,
           currentStep: "completed",
         });
         setTimeout(() => setSelectedTab("results"), 1000);
@@ -170,11 +170,9 @@ function App() {
             ? transformationData.system
             : "EPSG:4326",
         targetCRS: transformationData.targetSystem,
-        precision: 6,
         validateInput: true,
-        skipInvalid: false,
+        skipInvalid: true,
         includeOriginal: true,
-        calculatePrecision: true,
         generateReport: true,
       };
 
@@ -194,6 +192,9 @@ function App() {
       );
 
       if (result.success) {
+        if (result.summary.failed > 0) {
+          throw new Error(result.report?.errors?.[0]?.error ?? "Transformación fallida");
+        }
         setResults((prev) => [...prev, ...result.results]);
         setProcessingStatus({
           progress: 100,
@@ -515,15 +516,16 @@ function App() {
                   </div>
                   <div className="bg-white p-6 rounded-lg shadow border border-gray-200 text-center">
                     <div className="text-3xl font-bold text-purple-600 mb-1">
-                      {
-                        results.filter(
-                          (r) => r.precision?.quality === "Excelente"
-                        ).length
-                      }
+                      {results.length > 0
+                        ? `${(
+                            (results.filter((r) => r.status === "success")
+                              .length /
+                              results.length) *
+                            100
+                          ).toFixed(1)}%`
+                        : "-"}
                     </div>
-                    <div className="text-sm text-gray-600">
-                      Precisión Excelente
-                    </div>
+                    <div className="text-sm text-gray-600">Tasa de éxito</div>
                   </div>
                 </div>
 
@@ -552,7 +554,7 @@ function App() {
                             Sistema Destino
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Precisión
+                            Observación
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Estado
@@ -584,14 +586,16 @@ function App() {
                                   <>
                                     <div>
                                       Y:{" "}
-                                      {result.transformation.source.y?.toFixed(
-                                        6
+                                      {formatWithUnits(
+                                        result.transformation.source.y,
+                                        result.transformation.source.crs
                                       )}
                                     </div>
                                     <div>
                                       X:{" "}
-                                      {result.transformation.source.x?.toFixed(
-                                        6
+                                      {formatWithUnits(
+                                        result.transformation.source.x,
+                                        result.transformation.source.crs
                                       )}
                                     </div>
                                     <div className="text-xs text-gray-500">
@@ -607,17 +611,17 @@ function App() {
                                   <>
                                     <div>
                                       Y:{" "}
-                                      {result.transformation.target.y?.toFixed(
-                                        2
-                                      )}{" "}
-                                      m
+                                      {formatWithUnits(
+                                        result.transformation.target.y,
+                                        result.transformation.target.crs
+                                      )}
                                     </div>
                                     <div>
                                       X:{" "}
-                                      {result.transformation.target.x?.toFixed(
-                                        2
-                                      )}{" "}
-                                      m
+                                      {formatWithUnits(
+                                        result.transformation.target.x,
+                                        result.transformation.target.crs
+                                      )}
                                     </div>
                                   </>
                                 )}
@@ -629,20 +633,10 @@ function App() {
                               </div>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
-                              {result.precision && (
-                                <span
-                                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                    result.precision.quality === "Excelente"
-                                      ? "bg-green-100 text-green-800"
-                                      : result.precision.quality === "Muy buena"
-                                      ? "bg-blue-100 text-blue-800"
-                                      : result.precision.quality === "Buena"
-                                      ? "bg-yellow-100 text-yellow-800"
-                                      : "bg-red-100 text-red-800"
-                                  }`}
-                                >
-                                  {result.precision.quality}
-                                </span>
+                              {result.error && (
+                                <div className="text-xs text-red-700 whitespace-normal max-w-xs">
+                                  {result.error}
+                                </div>
                               )}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">

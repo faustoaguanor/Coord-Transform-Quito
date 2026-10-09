@@ -33,3 +33,6 @@ build/
 *.njsproj
 *.sln
 *.sw?
+
+# Tests
+coverage/

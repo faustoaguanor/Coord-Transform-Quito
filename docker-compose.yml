@@ -1,0 +1,16 @@
+services:
+  coord-transform:
+    build:
+      context: .
+      args:
+        BASE_PATH: /
+    image: coord-transform-quito:latest
+    container_name: coord-transform-quito
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true

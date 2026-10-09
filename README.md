@@ -1,222 +1,105 @@
 # Transformador de Coordenadas Quito
 
-Aplicación web React para transformación de coordenadas entre sistemas de referencia espacial utilizados en Quito, incluyendo WGS84, SIRES-DMQ, UTM 17N/S y UTM 18N/S.
+[![CI](https://github.com/faustoaguanor/Coord-Transform-Quito/actions/workflows/ci.yml/badge.svg)](https://github.com/faustoaguanor/Coord-Transform-Quito/actions/workflows/ci.yml)
+[![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE.txt)
 
-## Características Principales
+Aplicación web para transformar coordenadas entre los sistemas de referencia usados en el Distrito Metropolitano de Quito y en Ecuador: **WGS84**, **SIRES-DMQ** y **UTM 17N/17S/18N/18S**. Está pensada para el trabajo catastral: procesa lotes de miles de puntos desde CSV/Excel, valida cada fila y exporta el resultado conservando las columnas originales.
 
-### Sistemas de Coordenadas Soportados
-- **WGS84 Geográficas** - Latitud/Longitud en grados decimales y DMS
-- **SIRES-DMQ** - Sistema de Referencia Espacial del Distrito Metropolitano de Quito
-- **UTM Zona 17 Norte/Sur** - Ecuador occidental (incluye Quito, Guayaquil)
-- **UTM Zona 18 Norte/Sur** - Ecuador oriental (región amazónica)
+**Demo:** https://faustoaguanor.github.io/Coord-Transform-Quito
 
-### Métodos de Entrada
-- **Entrada manual** con tres formatos:
-  - Grados decimales (ej: -0.2201, -78.5123)
-  - Grados, minutos, segundos (DMS)
-  - Coordenadas proyectadas (UTM/SIRES)
-- **Carga de archivos** en formatos:
-  - CSV y Excel (.xlsx, .xls)
+## Características
 
-- **Ejemplos predefinidos** para pruebas rápidas
+| | |
+|---|---|
+| **Sistemas** | WGS84 (EPSG:4326), SIRES-DMQ, UTM 17N/17S/18N/18S (EPSG:32617/32717/32618/32718) |
+| **Entrada manual** | Grados decimales, DMS o coordenadas proyectadas, con vista previa en tiempo real |
+| **Lotes** | CSV (`,` `;` o tabulación) y Excel, hasta 50 000 filas / 10 MB; detección automática de columnas y del sistema |
+| **Validación** | Formato numérico (punto o coma decimal), rangos por sistema, columnas intercambiadas, signo omitido; reporte por número de fila |
+| **Exportación** | CSV y Excel (columnas originales + transformadas), GeoJSON (RFC 7946), KML |
+| **Precisión** | < 1 mm frente a PROJ, verificada con 279 tests automáticos |
+| **Privacidad** | Todo se procesa en el navegador; los datos no salen del equipo |
+| **Mapa** | Leaflet con capas base y soporte para WMS (geoportales del MDMQ e IGM) |
 
-### Funcionalidades
-- **Auto-detección** del sistema de coordenadas óptimo según ubicación
-- **Vista previa en tiempo real** de transformaciones
-- **Validación automática** de coordenadas con mensajes específicos
-- **Procesamiento por lotes** para archivos con múltiples puntos
-- **Mapa interactivo** con múltiples capas base y soporte WMS
-- **Manejo inteligente de formatos numéricos** (puntos/comas decimales y separadores de miles)
-- **Búsqueda y filtrado** de resultados en tiempo real
-- **Copiar al portapapeles** coordenadas transformadas con un clic
-- **Historial persistente** de transformaciones (LocalStorage)
-- **Calculadora de distancias** entre puntos geográficos
+## Inicio rápido
 
-### Exportación
-- **CSV** - Compatible con Excel, incluye BOM UTF-8
-- **Excel** - Formato nativo .xlsx con columnas ajustadas y metadatos
-- **GeoJSON** - Estándar para sistemas SIG (coordenadas en sistema transformado)
-- **KML** - Compatible con Google Earth y Google Maps (coordenadas en WGS84)
+Requisitos: Node.js ≥ 20.19 (ver `.nvmrc`).
 
-### Características Técnicas
-- Transformaciones precisas usando **proj4.js**
-- Interfaz responsive con **Tailwind CSS**
-- Mapa interactivo con **Leaflet** y OpenStreetMap
-- Soporte para servicios **WMS** personalizados
-- Manejo robusto de errores y validaciones
-- Procesamiento asíncrono con indicadores de progreso
-- Optimización de rendimiento con React.memo y useMemo
-- Persistencia de datos con LocalStorage
-- Cálculo de distancias usando fórmula de Haversine
-
-## Instalación
-
-### Prerrequisitos
-- Node.js (versión 16 o superior)
-- npm o yarn
-
-### Pasos de Instalación
-
-1. **Clonar el repositorio**
 ```bash
-git clone https://github.com/tu-usuario/coordtransform-quito.git
-cd coordtransform-quito
+npm ci
+npm run dev        # http://localhost:5173/Coord-Transform-Quito/
 ```
 
-2. **Instalar dependencias**
+| Script | Descripción |
+|---|---|
+| `npm run dev` | Servidor de desarrollo |
+| `npm test` | Tests unitarios (Vitest) |
+| `npm run lint` | ESLint |
+| `npm run build` | Compilación de producción en `dist/` |
+| `npm run check` | lint + tests + build (lo mismo que ejecuta el CI) |
+| `npm run deploy` | Publica `dist/` en GitHub Pages |
+
+## Despliegue en un servidor (Docker)
+
 ```bash
-npm install
+docker compose up -d --build
+# http://<servidor>:8080
 ```
 
-3. **Iniciar el servidor de desarrollo**
+O sin Compose:
+
 ```bash
-npm run dev
+docker build -t coord-transform-quito .
+docker run -d --name coord-transform -p 8080:8080 --restart unless-stopped coord-transform-quito
 ```
 
-4. **Abrir en el navegador**
-```
-http://localhost:5173
-```
+- La imagen ejecuta los tests durante la construcción: si una transformación falla, la imagen no se genera.
+- Usa nginx sin privilegios (puerto 8080), con cabeceras de seguridad, caché de recursos y `GET /healthz` para monitoreo.
+- Para publicar bajo un subdirectorio (p. ej. `https://intranet.quito.gob.ec/coordenadas/`): `docker build --build-arg BASE_PATH=/coordenadas/ .`
+- Detrás de un proxy inverso institucional (Apache/nginx), redirija el tráfico al puerto 8080 del contenedor y termine TLS en el proxy.
 
-### Dependencias Principales
-```json
-{
-  "react": "^18.0.0",
-  "proj4": "^2.9.0",
-  "leaflet": "^1.9.0",
-  "react-leaflet": "^4.2.0",
-  "xlsx": "^0.18.0"
-}
-```
+## Carga por lotes
 
-## Estructura del Proyecto
+Nombres de columna reconocidos (no distingue mayúsculas de minúsculas):
 
-```
-Coord-Transform-Quito/
-├── src/
-│   ├── components/
-│   │   ├── CoordinateInput.jsx      # Formulario de entrada manual
-│   │   ├── FileUpload.jsx           # Carga de archivos (CSV/Excel/GeoJSON/KML)
-│   │   └── MapComponent.jsx         # Mapa interactivo con Leaflet
-│   ├── utils/
-│   │   └── coordinateTransformations.js  # Motor de transformaciones
-│   ├── App.jsx                      # Componente principal
-│   └── main.jsx                     # Punto de entrada
-├── public/
-├── package.json
-└── README.md
-```
+| Dato | Encabezados |
+|---|---|
+| Latitud / Longitud | `lat`, `latitude`, `latitud` / `lon`, `lng`, `long`, `longitude`, `longitud` |
+| Este / Norte | `x`, `este`, `easting`, `utm_x`, `coord_x`, `coordenada_x` / `y`, `norte`, `northing`, `utm_y`, `coord_y`, `coordenada_y` |
+| Identificador | `nombre`, `name`, `punto`, `id`, `codigo`, `clave`, `clave_catastral` |
 
-## Uso
+Ejemplo:
 
-### Entrada Manual
-1. Seleccionar modo de entrada (decimales, DMS, o proyectadas)
-2. Ingresar coordenadas
-3. El sistema sugiere automáticamente el sistema de destino óptimo
-4. Vista previa en tiempo real de la transformación
-5. Confirmar transformación
-
-### Carga de Archivos
-1. Arrastrar archivo o usar botón de selección
-2. Formatos soportados: CSV, Excel 
-3. Auto-detección de columnas de coordenadas
-4. Configurar sistema de origen y destino
-5. Procesamiento automático con barra de progreso
-
-### Formatos de Columnas (CSV/Excel)
-- **Geográficas:** `lat`, `latitude`, `latitud`, `lon`, `lng`, `longitude`, `longitud`
-- **Proyectadas:** `x`, `este`, `easting`, `utm_x`, `y`, `norte`, `northing`, `utm_y`
-- **Nombres:** `name`, `nombre`, `punto`, `id`, `identificador`
-
-### Visualización
-- Mapa interactivo con múltiples capas base
-- Marcadores con información detallada
-- Soporte para capas WMS personalizadas
-- Auto-ajuste de vista para mostrar todos los puntos
-
-### Exportación
-- Seleccionar formato de exportación deseado (CSV, Excel, GeoJSON, KML)
-- Descarga automática del archivo con todos los datos transformados
-
-### Funcionalidades Adicionales
-- **Búsqueda:** Filtra resultados por nombre o ID en tiempo real
-- **Copiar coordenadas:** Botón para copiar coordenadas al portapapeles en cada resultado
-- **Historial:** Las transformaciones se guardan automáticamente y persisten entre sesiones
-- **Distancias:** Función integrada para calcular distancias entre puntos
-
-
-## Ejemplos de Uso
-
-### Coordenadas de Prueba
-- **Quito Centro:** -0.2201, -78.5123 (sugiere SIRES-DMQ)
-- **Guayaquil:** -2.1894, -79.8890 (sugiere UTM 17S)
-- **Amazonía:** -1.0000, -77.0000 (sugiere UTM 18S)
-
-### Archivo CSV de Ejemplo
 ```csv
-nombre,latitud,longitud
-Quito,-0.2201,-78.5123
-Guayaquil,-2.1894,-79.8890
-Cuenca,-2.9001,-79.0059
+clave_catastral;uso;este;norte
+1010101001;residencial;776904,297;9975649,232
+1010101002;comercial;780503,543;9988936,224
 ```
 
-## Scripts de Desarrollo
+> Las zonas UTM 17 y 18 no se distinguen por sus valores numéricos. Para datos en **zona 18** (Amazonía), seleccione el sistema de origen en lugar de usar "Auto-detectar".
 
-```bash
-# Desarrollo
-npm run dev
+## Documentación
 
-# Construcción para producción
-npm run build
+- [Documentación técnica](docs/TECNICO.md): parámetros EPSG/PROJ, fórmulas, precisión esperada, reglas de validación y limitaciones (datum, PSAD56, zonas).
+- [Protección de la rama `main`](docs/PROTECCION_RAMA.md)
+- [Guía de contribución](CONTRIBUTING.md) · [Seguridad](SECURITY.md) · [Cambios](CHANGELOG.md)
 
-# Vista previa de build
-npm run preview
+## Estructura
 
-# Linting
-npm run lint
 ```
-
-## Configuración para Producción
-
-1. **Construir la aplicación**
-```bash
-npm run build
+├── src/
+│   ├── components/            # CoordinateInput, FileUpload, MapComponent
+│   ├── utils/
+│   │   ├── coordinateTransformations.js   # Motor: sistemas, validación, lotes
+│   │   ├── fileParsing.js                 # Lectura CSV/Excel → puntos
+│   │   ├── exporters.js                   # CSV, Excel, GeoJSON, KML
+│   │   └── __tests__/                     # Tests + valores de referencia PROJ
+│   └── App.jsx
+├── scripts/generate_reference_points.py   # Genera los valores de referencia con pyproj
+├── docker/nginx.conf
+├── Dockerfile · docker-compose.yml
+└── .github/                   # CI, CODEOWNERS, plantillas, Dependabot
 ```
-
-2. **Servir archivos estáticos**
-Los archivos generados en `dist/` pueden servirse desde cualquier servidor web estático.
-
-
-## Consideraciones Técnicas
-
-### Precisión
-- Transformaciones implementadas usando definiciones oficiales proj4
-- SIRES-DMQ configurado según especificaciones del MDMQ
-- Validaciones específicas para rangos de Ecuador
-
-### Limitaciones
-- Servicios WMS requieren CORS habilitado
-- Archivos grandes (>1000 puntos) pueden requerir procesamiento por lotes
-
-
-### Navegadores Soportados
-- Chrome/Chromium 90+
-- Firefox 88+
-- Safari 14+
-- Edge 90+
 
 ## Licencia
 
-MIT License - ver archivo LICENSE para detalles
-
-## Créditos
-
-- Proyecciones geodésicas: [proj4js](https://github.com/proj4js/proj4js)
-- Mapas: [Leaflet](https://leafletjs.com/) y [OpenStreetMap](https://www.openstreetmap.org/)
-- Interfaz: [Tailwind CSS](https://tailwindcss.com/)
-- Sistemas de referencia: MDMQ
-
-
----
-
-Desarrollado específicamente para las necesidades de transformación de coordenadas en Quito.
+[MIT](LICENSE.txt). Proyecciones con [proj4js](https://github.com/proj4js/proj4js); mapas con [Leaflet](https://leafletjs.com/) y [OpenStreetMap](https://www.openstreetmap.org/).
